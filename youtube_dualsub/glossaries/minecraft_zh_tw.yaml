@@ -1,0 +1,253 @@
+# Minecraft terminology, Traditional Chinese (Taiwan).
+#
+# `source`  the English term as it is spoken
+# `target`  the rendering used by the zh-TW Minecraft client
+# `aliases` renderings a general-purpose LLM reaches for instead — usually the
+#           mainland-Chinese name or a literal translation. These are rewritten
+#           to `target` after translation, which catches the (common) case where
+#           the model simply ignored the glossary in the prompt.
+#
+# Only add an alias you are sure is wrong in context. `aliases` are substring
+# matches for CJK, so an alias that is also an ordinary word will over-fire.
+
+terms:
+  # --- the game itself --------------------------------------------------
+  # Models reach for 我的世界, which is the mainland name. Taiwan keeps the
+  # English title (麥塊 colloquially); the alias rewrite also fixes 《我的世界》
+  # because CJK aliases match as plain substrings.
+  - source: Minecraft
+    target: Minecraft
+    aliases: [我的世界]
+
+  # --- dimensions and places -------------------------------------------
+  - source: Nether
+    target: 地獄
+    aliases: [下界]
+  - source: Nether portal
+    target: 地獄傳送門
+    aliases: [下界傳送門]
+  - source: Nether fortress
+    target: 地獄要塞
+    aliases: [下界要塞]
+  - source: bastion
+    target: 堡壘遺蹟
+  - source: the End
+    target: 終界
+    aliases: [末地]
+  - source: End portal
+    target: 終界傳送門
+    aliases: [末地傳送門]
+  - source: stronghold
+    target: 要塞
+  - source: Overworld
+    target: 主世界
+  - source: spawn
+    target: 出生點
+  - source: biome
+    target: 生態域
+    aliases: [生物群系]
+  - source: chunk
+    target: 區塊
+  - source: seed
+    target: 種子碼
+  - source: ravine
+    target: 峽谷
+  - source: spawner
+    target: 生怪磚
+    aliases: [刷怪籠]
+
+  # --- mobs -------------------------------------------------------------
+  - source: creeper
+    target: 苦力怕
+    aliases: [爬行者, 爬行怪, 苦力帕]
+  - source: enderman
+    target: 終界使者
+    aliases: [末影人]
+  - source: Ender Dragon
+    target: 終界龍
+    aliases: [末影龍, 末地龍]
+  - source: blaze
+    target: 烈焰使者
+    aliases: [烈焰人]
+  - source: ghast
+    target: 地獄幽靈
+    aliases: [惡魂]
+  - source: piglin
+    target: 豬布林
+    aliases: [豬靈]
+  - source: piglin brute
+    target: 豬布林蠻兵
+  - source: zombified piglin
+    target: 殭屍化豬布林
+    aliases: [殭屍豬人]
+  - source: hoglin
+    target: 疣豬獸
+  - source: wither
+    target: 凋零
+    aliases: [凋靈]
+  - source: wither skeleton
+    target: 凋零骷髏
+  - source: skeleton
+    target: 骷髏
+  - source: zombie
+    target: 殭屍
+  - source: spider
+    target: 蜘蛛
+  - source: slime
+    target: 史萊姆
+  - source: villager
+    target: 村民
+  - source: iron golem
+    target: 鐵傀儡
+  - source: shulker
+    target: 界伏蚌
+  - source: mob
+    target: 生物
+  - source: hostile mob
+    target: 敵對生物
+
+  # --- items ------------------------------------------------------------
+  - source: golden apple
+    target: 金蘋果
+  - source: gapple
+    target: 金蘋果
+  - source: enchanted golden apple
+    target: 附魔金蘋果
+  - source: notch apple
+    target: 附魔金蘋果
+  - source: ender pearl
+    target: 終界珍珠
+    aliases: [末影珍珠]
+  - source: eye of ender
+    target: 終界之眼
+    aliases: [末影之眼]
+  - source: blaze rod
+    target: 烈焰桿
+    aliases: [烈焰棒]
+  - source: blaze powder
+    target: 烈焰粉
+  - source: obsidian
+    target: 黑曜石
+  - source: netherite
+    target: 獄髓
+    aliases: [下界合金]
+  - source: diamond
+    target: 鑽石
+  - source: emerald
+    target: 綠寶石
+  - source: lapis
+    target: 青金石
+  - source: redstone
+    target: 紅石
+  - source: glowstone
+    target: 螢石
+  - source: soul sand
+    target: 靈魂沙
+  - source: bedrock
+    target: 基岩
+  - source: cobblestone
+    target: 鵝卵石
+  - source: gravel
+    target: 礫石
+  - source: nether wart
+    target: 地獄疙瘩
+    aliases: [下界疣]
+  - source: flint and steel
+    target: 打火石
+  - source: water bucket
+    target: 水桶
+  - source: lava
+    target: 熔岩
+    aliases: [岩漿]
+  - source: elytra
+    target: 鞘翅
+  - source: trident
+    target: 三叉戟
+  - source: crossbow
+    target: 弩
+  - source: shield
+    target: 盾牌
+  - source: pickaxe
+    target: 鎬
+  - source: totem of undying
+    target: 不死圖騰
+  - source: respawn anchor
+    target: 重生錨
+  - source: ender chest
+    target: 終界箱
+    aliases: [末影箱]
+  - source: shulker box
+    target: 界伏蚌盒
+  - source: trapdoor
+    target: 地板門
+    aliases: [活板門]
+  - source: minecart
+    target: 礦車
+  - source: torch
+    target: 火把
+
+  # --- blocks and stations ---------------------------------------------
+  - source: crafting table
+    target: 工作台
+  - source: furnace
+    target: 熔爐
+  - source: anvil
+    target: 鐵砧
+  - source: enchanting table
+    target: 附魔台
+  - source: brewing stand
+    target: 釀造台
+  - source: chest
+    target: 儲物箱
+
+  # --- potions and enchantments ----------------------------------------
+  - source: splash potion
+    target: 噴濺藥水
+  - source: fire resistance
+    target: 抗火
+  - source: regeneration
+    target: 回復
+  - source: sharpness
+    target: 鋒利
+  - source: protection
+    target: 保護
+  - source: efficiency
+    target: 效率
+  - source: knockback
+    target: 擊退
+  - source: enchant
+    target: 附魔
+
+  # --- verbs, slang and modes ------------------------------------------
+  - source: speedrun
+    target: 速通
+    aliases: [速跑]
+  - source: speedrunner
+    target: 速通者
+  - source: manhunt
+    target: 獵殺
+  - source: hunter
+    target: 獵人
+  - source: respawn
+    target: 重生
+  - source: crit
+    target: 爆擊
+    aliases: [暴擊]
+  - source: critical hit
+    target: 爆擊
+  - source: XP
+    target: 經驗值
+  - source: bridge
+    target: 搭橋
+  - source: block
+    target: 方塊
+  - source: hardcore
+    target: 極限模式
+  - source: survival mode
+    target: 生存模式
+  - source: creative mode
+    target: 創造模式
+  - source: MLG water bucket
+    target: MLG 水桶接水
+  - source: clutch
+    target: 神救援

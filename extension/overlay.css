@@ -1,0 +1,139 @@
+/* The overlay lives inside #movie_player so it follows the player into
+   fullscreen, theater mode and the miniplayer without any extra bookkeeping. */
+
+#dualsub-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 8%;
+  z-index: 30; /* above the video, below the player controls */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+  text-align: center;
+  padding: 0 6%;
+  font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
+  transition: opacity 120ms linear;
+}
+
+#dualsub-overlay[hidden],
+#dualsub-overlay.dualsub-ad {
+  display: none;
+}
+
+/* Nudge above the control bar while it is showing, so subtitles are never
+   hidden behind the scrubber. */
+.ytp-autohide #dualsub-overlay {
+  bottom: 6%;
+}
+
+#dualsub-overlay .dualsub-line {
+  display: inline-block;
+  max-width: 100%;
+  line-height: 1.28;
+  color: #fff;
+  text-shadow:
+    0 0 4px rgba(0, 0, 0, 0.95),
+    0 2px 6px rgba(0, 0, 0, 0.9);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#dualsub-overlay .dualsub-zh {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+#dualsub-overlay .dualsub-en {
+  opacity: 0.86;
+  font-weight: 400;
+}
+
+#dualsub-overlay .dualsub-line:empty {
+  display: none;
+}
+
+/* A line still waiting on the translator shows the source only, dimmed a
+   little so the state is visible rather than mysterious. */
+#dualsub-overlay.dualsub-pending .dualsub-en {
+  opacity: 1;
+}
+
+/* --- the button in the player controls --------------------------------- */
+
+.dualsub-button {
+  position: relative;
+  width: 48px;
+  cursor: pointer;
+}
+
+.dualsub-button .dualsub-badge {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.5px;
+  color: #fff;
+  opacity: 0.9;
+}
+
+.dualsub-button[data-active="true"] .dualsub-badge {
+  color: #3ea6ff;
+}
+
+.dualsub-button[data-busy="true"] .dualsub-badge {
+  animation: dualsub-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes dualsub-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+/* --- status chip -------------------------------------------------------- */
+
+#dualsub-status {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 31;
+  max-width: 60%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font: 500 12px/1.4 "Roboto", "Microsoft JhengHei", sans-serif;
+  pointer-events: none;
+  transition: opacity 200ms linear;
+}
+
+#dualsub-status[hidden] {
+  display: none;
+}
+
+#dualsub-status .dualsub-bar {
+  margin-top: 5px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.25);
+  overflow: hidden;
+}
+
+#dualsub-status .dualsub-bar > i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #3ea6ff;
+  transition: width 300ms linear;
+}
+
+#dualsub-status.dualsub-error {
+  background: rgba(140, 20, 20, 0.85);
+}
+
+/* Our overlay replaces YouTube's captions rather than fighting them for the
+   same corner of the screen. */
+body.dualsub-active .ytp-caption-window-container {
+  display: none !important;
+}

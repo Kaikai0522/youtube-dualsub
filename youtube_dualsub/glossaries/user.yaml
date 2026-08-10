@@ -1,0 +1,19 @@
+# Your personal glossary. This file wins over every other layer, including the
+# curated domain glossaries and anything the model extracted from the video.
+#
+# Edit it whenever a translation gets a name wrong; the fix applies from the
+# next run onward, and re-running a translation does not re-run Whisper.
+#
+#   uv run dualsub <video_id> --retranslate
+#
+# Format:
+#
+# terms:
+#   - source: prompt engineering    # the English term as spoken
+#     target: 提示工程               # what you want to see
+#     aliases: [提示詞工程]          # renderings to rewrite to `target`
+#
+# `aliases` are matched as plain substrings for Chinese text, so avoid aliases
+# that are also ordinary words.
+
+terms: []

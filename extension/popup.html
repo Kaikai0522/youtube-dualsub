@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>YouTube DualSub</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #101014;
+        --muted: #6b6b76;
+        --line: #e2e2e8;
+        --accent: #1f6feb;
+        --bad: #b3261e;
+        --good: #1a7f37;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #e8e8ee;
+          --muted: #9a9aa6;
+          --line: #2c2c34;
+          --accent: #3ea6ff;
+          --good: #3fb950;
+        }
+      }
+      body {
+        width: 300px;
+        margin: 0;
+        padding: 14px;
+        font: 13px/1.45 system-ui, "Microsoft JhengHei", sans-serif;
+        color: var(--fg);
+      }
+      h1 {
+        margin: 0 0 2px;
+        font-size: 14px;
+      }
+      .status {
+        margin-bottom: 12px;
+        color: var(--muted);
+      }
+      .status.ok { color: var(--good); }
+      .status.bad { color: var(--bad); }
+      label {
+        display: block;
+        margin: 12px 0 4px;
+        font-weight: 600;
+      }
+      select, input[type="range"] {
+        width: 100%;
+        box-sizing: border-box;
+      }
+      select {
+        padding: 5px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .row label {
+        margin: 0;
+        font-weight: 400;
+      }
+      .hint {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      hr {
+        margin: 14px 0 0;
+        border: 0;
+        border-top: 1px solid var(--line);
+      }
+      .value {
+        float: right;
+        color: var(--muted);
+        font-weight: 400;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>YouTube DualSub</h1>
+    <div class="status" id="status">Checking the local backend…</div>
+
+    <label for="model">Translation model</label>
+    <select id="model"></select>
+    <div class="hint">Changing this does not re-run transcription — only the translation.</div>
+
+    <label for="font">Chinese font size <span class="value" id="fontValue"></span></label>
+    <input id="font" type="range" min="14" max="64" step="1" />
+
+    <div class="row">
+      <input id="opencc" type="checkbox" />
+      <label for="opencc">Force Traditional Chinese (OpenCC s2twp)</label>
+    </div>
+    <div class="hint">
+      Turn this off to see whether the model really needs it.
+    </div>
+
+    <div class="row">
+      <input id="context" type="checkbox" />
+      <label for="context">Read the whole video first (summary + glossary)</label>
+    </div>
+    <div class="hint">
+      Off is faster but each batch is translated blind, so names and jargon drift
+      over a long video. Changing this re-runs translation, not transcription.
+    </div>
+
+    <hr />
+    <div class="hint" id="footer"></div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,53 @@
+[project]
+name = "youtube-dualsub"
+version = "0.1.0"
+description = "Local bilingual (English + Traditional Chinese) subtitles for YouTube, powered by faster-whisper and a local LLM"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "faster-whisper>=1.1",
+    "yt-dlp>=2025.1.1",
+    "ollama>=0.4",
+    "opencc-python-reimplemented>=0.1.7",
+    "pyyaml>=6.0",
+    # CTranslate2 (behind faster-whisper) needs cuDNN 9 + cuBLAS at runtime.
+    # These wheels ship the Windows DLLs; youtube_dualsub._cuda puts them on the
+    # DLL search path so you never have to install the full CUDA toolkit.
+    "nvidia-cublas-cu12>=12.4",
+    "nvidia-cudnn-cu12>=9.1,<10",
+]
+
+[project.optional-dependencies]
+# Demucs vocal isolation is optional: it drags in torch (~3 GB download).
+# Without it the pipeline still runs, it just feeds raw audio to Whisper.
+vocals = [
+    "demucs>=4.0.1",
+    "torch>=2.6",
+    "torchaudio>=2.6",
+]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+dualsub = "youtube_dualsub.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["youtube_dualsub"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning:youtube_dualsub.*"]
