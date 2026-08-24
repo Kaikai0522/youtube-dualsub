@@ -56,6 +56,17 @@ Use `http://127.0.0.1/*`.
 **The content script uses `pagehide`.** YouTube's permissions policy blocks
 `unload` and `beforeunload`; registering them throws rather than doing nothing.
 
+**yt-dlp is upgraded at launch, never mid-job** (`start.ps1`). A stale yt-dlp
+does not fail loudly; it 403s on every video, because YouTube's SABR migration
+retires whatever client that release still knew how to use. Measured on
+`nNWM9a-SNTQ`: 2026.07.04 could list formats via `android_vr` but every media URL
+returned 403, and `ios`/`mweb`/`web_safari` returned no formats at all;
+2026.08.19 switched to `visionos` and downloaded on the first format spec with
+`format_chain` untouched. The version string is a date, so the staleness check
+costs no network. Moving the upgrade into the pipeline's `AudioUnavailable`
+handler looks obvious and does nothing: the running process already holds the old
+`yt_dlp` module in memory, so the fix cannot take effect until the next restart.
+
 **Stages run serially and release their VRAM.** Demucs (~4 GB), Whisper (~3 GB)
 and a 12–14 B model (~9 GB) never coexist. Peak stays under 9 GB on a 16 GB card.
 
@@ -88,6 +99,9 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 uv run python -m youtube_dualsub.main
 ```
+
+`start.cmd` does exactly this kill-then-start on every launch, so a double-click
+is also the shortest way to pick up a Python edit.
 
 **Extension edits need both a reload and a page refresh.** The old content script
 keeps running in open tabs until the page reloads, so stale errors keep appearing

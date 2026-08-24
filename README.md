@@ -37,7 +37,19 @@
 
 ## 使用
 
-啟動後端並保持執行：
+**按兩下 `start.cmd`**，然後讓那個視窗開著。
+
+它會依序備妥後端需要的每一件事：關掉殘留的舊 server、`uv sync`、確認 yt-dlp 沒有過期、必要時在背景啟動 `ollama serve`、拉取設定檔指定的翻譯模型，最後等 `/api/health` 回應才宣告就緒。關掉視窗就是關掉後端。
+
+其中 yt-dlp 那步值得說明：它的版本號本身就是日期，而 YouTube 每隔幾週就會弄壞它。過期時的症狀不是明顯的錯誤，而是每支影片都 `HTTP Error 403: Forbidden`。讀日期不需要連網也不花時間，所以只要超過 14 天就會在後端啟動前先升級。
+
+```powershell
+.\start.ps1 -UpdateYtDlp        # 不管幾天，強制升級 yt-dlp
+.\start.ps1 -SkipYtDlpCheck     # 離線時完全不碰 yt-dlp
+.\start.ps1 -YtDlpMaxAgeDays 7  # 改成 7 天就算過期
+```
+
+原本的方式仍然有效，只是不會幫你檢查上面那些：
 
 ```powershell
 uv run python -m youtube_dualsub.main
