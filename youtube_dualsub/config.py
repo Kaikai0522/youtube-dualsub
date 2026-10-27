@@ -4,7 +4,7 @@ Nothing else in the codebase should hard-code a threshold, a model name or a
 path. Override anything by dropping a ``config.local.json`` next to
 ``pyproject.toml`` with the same nested shape, e.g.::
 
-    {"translate": {"model": "qwen3:14b"}, "vocals": {"enabled": false}}
+    {"translate": {"model": "qwen3:14b"}, "asr": {"language": "ja"}}
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ DATA_DIR = Path(os.environ.get("DUALSUB_DATA_DIR") or (ROOT / "data"))
 CACHE_DIR = DATA_DIR / "cache"          # downloaded audio, isolated vocals
 DB_PATH = DATA_DIR / "dualsub.sqlite3"
 EXPORT_DIR = DATA_DIR / "exports"
+MODEL_DIR = DATA_DIR / "models"          # downloaded ONNX models (diarization)
 GLOSSARY_DIR = Path(__file__).resolve().parent / "glossaries"
 LOCAL_CONFIG = ROOT / "config.local.json"
 
@@ -27,7 +28,23 @@ LOCAL_CONFIG = ROOT / "config.local.json"
 #: a caption parser fix, a change to hallucination filtering, and so on. It is
 #: part of the ASR fingerprint, so bumping it retires every cached transcript.
 #: v2: collapse YouTube's rolling caption repeats.
-INGEST_VERSION = 2
+#: v3: language-aware ingestion (Japanese), caption lines kept as cues,
+#:     scored sentence segmentation, batched Whisper with a context prompt.
+#: v4: timestamps snapped to speech, stranded kana re-attached, short
+#:     repeated reactions kept, zero-length lines dropped.
+#: v5: Japanese sentences break at Whisper's spaces and segment ends, speaker
+#:     changes move to the nearest breakable gap, "V C" pieces stay one word.
+#: v6: stranded prefixes re-attached across digits and Latin too, and an
+#:     over-long first token cut back before re-attaching.
+#: v7: YouTube gap-fill lines drop edge words Whisper already has.
+#: v8: gap-fill lines Whisper's decode cannot match are force-aligned.
+INGEST_VERSION = 8
+
+#: Bump when the rules that accept or reject a wiki answer for a term change
+#: (``terms.py``). It keys the lookup cache, the cached per-video context and
+#: the translations built on it, so a fixed rule is not ignored in favour of
+#: an answer cached under the old one.
+TERMS_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -53,16 +70,22 @@ class AudioConfig:
     sample_rate: int = 16000  # what Whisper wants; resampled by ffmpeg
     cookies_from_browser: str | None = None  # e.g. "chrome" for age-gated videos
     # Human-uploaded captions beat anything we can transcribe locally and cost
-    # zero GPU seconds. Auto-generated tracks are never used (decision Q2).
+    # zero GPU seconds. Auto-generated tracks never replace Whisper (decision
+    # Q2); they only fill its gaps (asr.youtube_gap_fill).
     prefer_manual_captions: bool = True
     max_duration_s: int = 3 * 60 * 60  # hard ceiling: 3 hours (decision Q15)
 
 
 @dataclass(frozen=True)
 class VocalsConfig:
-    """Demucs vocal isolation — on by default, A/B-tested during acceptance (Q30)."""
+    """Optional Demucs vocal isolation (``uv sync --extra vocals``).
 
-    enabled: bool = True
+    Off by default: it needs a 3 GB torch install, and the transcript's
+    fingerprint used to claim "vocals on" on machines where Demucs was missing
+    and the stage had quietly degraded to the raw mix.
+    """
+
+    enabled: bool = False
     model: str = "htdemucs"
     device: str = "cuda"
     # Demucs peaks around 4 GB; the stage releases it before ASR loads.
@@ -76,7 +99,10 @@ class AsrConfig:
     model: str = "large-v3"
     device: str = "cuda"
     compute_type: str = "float16"
-    language: str | None = "en"  # None = autodetect (Q5: other languages later)
+    #: None = use the language YouTube reports for the video, and let Whisper
+    #: detect it when YouTube does not know. Forcing "en" on a Chinese video
+    #: made Whisper *translate* it into English instead of transcribing it.
+    language: str | None = None
     beam_size: int = 5
     word_timestamps: bool = True
     # CRITICAL for noisy multi-speaker content: with this on, one hallucination
@@ -85,6 +111,28 @@ class AsrConfig:
     vad_filter: bool = True
     vad_min_silence_ms: int = 400
     vad_speech_pad_ms: int = 200
+    # Silero's default is 0.5. At 0.35 the batched decoder is handed quieter
+    # speech: missing caption lines on a two-speaker clip went 10 -> 7 of 48.
+    vad_threshold: float = 0.35
+    # Clamp word timestamps to the audio that has speech (asr.snap_to_speech).
+    snap_to_speech: bool = True
+    # Batched inference decodes many VAD chunks at once. Measured on a 196 s
+    # Japanese multi-speaker clip: 22.5 s sequential, 4.1 s batched. Batched
+    # mode only uses the first temperature, so a chunk that comes back looping
+    # is re-decoded sequentially with the full fallback ladder below.
+    batched: bool = True
+    batch_size: int = 16
+    # The names in the title, as the batched decoder's prompt. Lowered CER in
+    # both languages and tripled Japanese punctuation (see pipeline/asr.py).
+    context_prompt: bool = True
+    # Add YouTube's auto-caption lines where Whisper wrote nothing — shouted
+    # speech, mostly, which the VAD never hands to Whisper. pipeline/gapfill.py
+    # has the measurements.
+    youtube_gap_fill: bool = True
+    # Keep those lines' text but take their timing from Whisper, decoded over
+    # the line's stretch without the VAD; YouTube's windows are display times,
+    # not speech times (gapfill.retime).
+    youtube_gap_retime: bool = True
     # Whisper falls back through these temperatures when a window looks degenerate.
     temperature: tuple[float, ...] = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
     compression_ratio_threshold: float = 2.4
@@ -93,43 +141,99 @@ class AsrConfig:
 
 
 @dataclass(frozen=True)
-class SentenceConfig:
-    """Rebuilding ASR fragments into whole semantic sentences."""
+class DiarizationConfig:
+    """Who is speaking: sherpa-onnx on the CPU (pipeline/diarize.py).
 
-    # A pause longer than this ends a sentence even without punctuation.
-    pause_break_s: float = 0.7
-    # Never glue more than this much audio into one sentence.
+    Speakers are never shown. A change of voice only tells the sentence
+    builder where one person's line ends and the next begins.
+    """
+
+    enabled: bool = True
+    embedding_model: str = "3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx"
+    # CAM++ (zh/en) was measured against ERes2NetV2, TitaNet and WeSpeaker on
+    # three Japanese clips: best agreement with reference speaker labels and
+    # the fastest (5 s for a 7.5-minute clip). WeSpeaker merged everyone into
+    # one voice.
+    # Higher merges more voices into one speaker; lower splits one voice into
+    # several. At 0.9, with near-silent clusters dropped, the two- and
+    # three-person clips came out as two and three speakers.
+    cluster_threshold: float = 0.9
+    # Set when you know the count; 0 = decide from the threshold.
+    num_speakers: int = 0
+    # 8 threads measured no faster than 4.
+    num_threads: int = 4
+
+
+@dataclass(frozen=True)
+class SentenceConfig:
+    """Rebuilding Whisper's word stream into subtitle-sized sentences.
+
+    Lengths are in *visible* characters (a kanji counts as two), so one set of
+    numbers serves English and Japanese. See ``pipeline/sentences.py``.
+    """
+
+    # A sentence this long reads comfortably as one or two subtitle lines.
+    target_chars: int = 84
+    target_s: float = 6.0
+    # Never glue more than this into one translation unit.
+    max_chars: int = 200
     max_sentence_s: float = 12.0
-    max_sentence_chars: int = 240
-    sentence_end_chars: str = ".!?"
-    # A fragment shorter than this is always glued to its neighbour.
-    min_fragment_chars: int = 3
+    # A pause this long always ends a sentence, whatever the grammar says.
+    hard_pause_s: float = 2.5
+    # Human captions are already cut by a human; a line is only split when it
+    # runs longer than this.
+    caption_max_s: float = 10.0
 
 
 @dataclass(frozen=True)
 class ContextConfig:
-    """Map-reduce whole-video summary + terminology extraction (Q22)."""
+    """Whole-video summary + automatic terminology (Q22).
+
+    Terminology is never hand-written. The LLM proposes the names and jargon it
+    finds; each one is then looked up in Wikipedia (and a domain wiki when the
+    video's subject has one) for its Traditional Chinese title. Measured against
+    the old hand-made Minecraft glossary: gemma4:12b alone matched 55/99 terms
+    (下界 for Nether, 苦力機 for creeper); the wiki lookup matched 76/99 in
+    1.8 s, and most of its "misses" were the old glossary being wrong.
+    """
 
     enabled: bool = True
     model: str = ""  # empty = reuse TranslateConfig.model
-    chunk_sentences: int = 120
+    # A transcript this long or shorter is read in one request; longer ones are
+    # summarised in chunks and merged.
+    single_pass_chars: int = 24000
+    chunk_sentences: int = 150
     max_chunks: int = 24  # 3h video -> summaries stay bounded
-    max_auto_terms: int = 60
+    max_auto_terms: int = 80
+    num_ctx: int = 16384
+    # Look terms up online. Off = rely on the model's own knowledge.
+    wiki_lookup: bool = True
+    wiki_timeout_s: float = 8.0
+    # MediaWiki sites that know a subject better than Wikipedia does, as
+    # (keyword in the detected subject, English wiki API, Chinese wiki API).
+    # Any wiki whose pages link to a Chinese edition with zh-tw variant
+    # conversion works; Wikipedia itself is always consulted.
+    domain_wikis: tuple[tuple[str, str, str], ...] = (
+        ("minecraft", "https://minecraft.wiki/api.php", "https://zh.minecraft.wiki/api.php"),
+    )
 
 
 @dataclass(frozen=True)
 class TranslateConfig:
-    # Measured on this project's acceptance video, 12 hard single lines plus
-    # three batches of ten:
-    #   qwen3:14b, reasoning off  12/12 and 3/3, ~2s per batch of ten
-    #   gemma4:12b               11/12 and 1/3, 57-75s per batch
-    # Both are reasoning models; the difference is almost entirely that Gemma
-    # cannot be talked out of thinking for thousands of tokens per line.
-    model: str = "qwen3:14b"
+    # gemma4:12b translates Japanese and English better than qwen3:14b. It once
+    # measured 57-75 s per batch, but that was its reasoning running unchecked;
+    # with `think` off it answers in seconds.
+    model: str = "gemma4:12b"
     # Subtitle translation has nothing to reason about. Leaving this on cost
     # gemma4 up to 4000 thinking tokens for a three-word line.
     think: bool = False
-    batch_size: int = 10
+    # Batch size barely matters for speed (96 lines: 0.175 s/line at 8 and at
+    # 32); generation is the bottleneck. Concurrent requests are what help:
+    # Ollama decodes them together, 1.5x faster at 2 and 1.8x at 4, with no
+    # extra VRAM.
+    batch_size: int = 16
+    parallel: int = 4
+
     # The ladder must be able to reach one line: measured on this video, every
     # sentence translates correctly on its own, including the ones that make a
     # batch of ten loop forever. Single-line translation is the slow floor that
@@ -141,12 +245,15 @@ class TranslateConfig:
     # not the model working.
     max_tokens_per_line: int = 60
     max_tokens_overhead: int = 150
-    # Sliding window: how many previous sentence pairs to show as context (Q22).
+    # Sliding window: how many previous pairs to show as context (Q22), and how
+    # many upcoming source lines. Look-ahead is what lets a caption line that
+    # stops mid-sentence be translated as the first half of that sentence.
     context_pairs: int = 6
+    lookahead_lines: int = 3
     temperature: float = 0.3
     num_ctx: int = 8192
     # Bump when the prompt changes so cached translations are invalidated.
-    prompt_version: str = "v1"
+    prompt_version: str = "v2"
     target_language: str = "繁體中文（台灣）"
     style: str = "natural"  # "natural" (Q27) | "literal"
     request_timeout_s: float = 180.0
@@ -156,7 +263,9 @@ class TranslateConfig:
 class PostprocessConfig:
     opencc_enabled: bool = True  # A/B switch: does gemma4 actually emit 简体? (Q9)
     opencc_config: str = "s2twp"  # simplified -> Taiwan traditional, with phrases
-    glossary_files: tuple[str, ...] = ("minecraft_zh_tw.yaml", "user.yaml")
+    # Optional overrides only. Terminology is extracted automatically per video;
+    # this file exists for the rare name you want rendered your own way.
+    glossary_files: tuple[str, ...] = ("user.yaml",)
     # Auto-extracted terms are per-video only; never carried across videos (Q28).
     use_auto_terms: bool = True
 
@@ -171,7 +280,8 @@ class ShapeConfig:
     # ends up showing text seconds before it is spoken.
     merge_max_gap_s: float = 0.6
     max_chars_zh: int = 20          # full-width chars per Chinese line
-    max_chars_en: int = 84
+    max_chars_en: int = 84          # source line in a spaced script
+    max_chars_ja: int = 30          # source line in Japanese, full-width chars
     max_duration_s: float = 7.0
     min_duration_s: float = 1.0     # soft floor; never crosses the next cue (Q29)
     # Gap left between a cue and the next one when they would otherwise touch.
@@ -185,7 +295,6 @@ class SubtitleStyleConfig:
     zh_on_top: bool = True   # decision Q11(b)
     font_size_zh: int = 30
     font_size_en: int = 22
-    show_speaker_prefix: bool = True  # inert until diarization lands (Q26)
 
 
 @dataclass(frozen=True)
@@ -194,6 +303,7 @@ class Settings:
     audio: AudioConfig = field(default_factory=AudioConfig)
     vocals: VocalsConfig = field(default_factory=VocalsConfig)
     asr: AsrConfig = field(default_factory=AsrConfig)
+    diarization: DiarizationConfig = field(default_factory=DiarizationConfig)
     sentences: SentenceConfig = field(default_factory=SentenceConfig)
     context: ContextConfig = field(default_factory=ContextConfig)
     translate: TranslateConfig = field(default_factory=TranslateConfig)
@@ -212,20 +322,33 @@ class Settings:
         change to the sentence limits was silently ignored in favour of stale
         rows, which wasted a debugging session twice.
         """
-        s = self.sentences
+        s, a = self.sentences, self.asr
         return "|".join(
             [
                 f"v{INGEST_VERSION}",
-                self.asr.model,
-                self.asr.compute_type,
-                str(self.asr.language),
-                f"vad{int(self.asr.vad_filter)}",
+                a.model,
+                a.compute_type,
+                str(a.language or "auto"),
+                f"vad{int(a.vad_filter)}",
+                f"batch{int(a.batched)}",
+                f"prompt{int(a.context_prompt)}",
+                f"snap{int(a.snap_to_speech)}",
+                f"ytfill{int(a.youtube_gap_fill)}",
+                f"retime{int(a.youtube_gap_retime)}",
+                f"vadt{a.vad_threshold}",
                 f"vocals{int(self.vocals.enabled)}",
+                self._diarization_key(),
                 f"manual{int(self.audio.prefer_manual_captions)}",
-                f"sent{s.pause_break_s},{s.max_sentence_s},"
-                f"{s.max_sentence_chars},{s.min_fragment_chars}",
+                f"sent{s.target_chars},{s.target_s},{s.max_chars},"
+                f"{s.max_sentence_s},{s.hard_pause_s},{s.caption_max_s}",
             ]
         )
+
+    def _diarization_key(self) -> str:
+        d = self.diarization
+        if not d.enabled:
+            return "diar0"
+        return f"diar{d.embedding_model},{d.cluster_threshold},{d.num_speakers}"
 
     @property
     def translation_fingerprint(self) -> str:
@@ -237,6 +360,7 @@ class Settings:
                 self.translate.style,
                 self.translate.target_language,
                 f"ctx{int(self.context.enabled)}",
+                f"wiki{int(self.context.wiki_lookup)}r{TERMS_VERSION}",
             ]
         )
 

@@ -54,7 +54,7 @@ def clean_batch(
     translations: list[Translation], settings: Settings, glossary: Glossary
 ) -> list[Translation]:
     for t in translations:
-        # A source-fallback line is English on purpose; running it through a
+        # A source-fallback line is untranslated on purpose; running it through a
         # Chinese converter and glossary would only corrupt it.
         if t.status is TranslationStatus.SOURCE_FALLBACK:
             continue

@@ -70,7 +70,29 @@ CREATE TABLE IF NOT EXISTS glossary_cache (
     target   TEXT NOT NULL,
     PRIMARY KEY (video_id, source)
 );
+
+-- Wiki terminology lookups, shared across videos. A NULL result is a cached
+-- miss, so a term no wiki knows is not asked about again on every video.
+CREATE TABLE IF NOT EXISTS term_lookups (
+    api        TEXT NOT NULL,
+    title      TEXT NOT NULL,
+    result     TEXT,
+    fetched_at REAL NOT NULL,
+    PRIMARY KEY (api, title)
+);
 """
+
+#: Columns added after the first release. SQLite cannot ADD COLUMN IF NOT
+#: EXISTS, so each is attempted and "duplicate column" is ignored.
+_MIGRATIONS = (
+    "ALTER TABLE jobs ADD COLUMN language TEXT",
+    "ALTER TABLE jobs ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE jobs ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE jobs ADD COLUMN domain TEXT NOT NULL DEFAULT ''",
+)
+
+#: A cached miss is retried after this long; wikis gain pages.
+_MISS_TTL_S = 30 * 24 * 3600
 
 
 class Store:
@@ -80,6 +102,12 @@ class Store:
         self._lock = threading.RLock()
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            for statement in _MIGRATIONS:
+                try:
+                    conn.execute(statement)
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column" not in str(exc):
+                        raise
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -111,6 +139,7 @@ class Store:
         allowed = {
             "title", "uploader", "duration_s", "stage", "fraction",
             "message", "error", "summary", "auto_terms", "context_key",
+            "language", "description", "tags", "domain",
         }
         unknown = set(fields) - allowed
         if unknown:
@@ -216,6 +245,7 @@ class Store:
             summary=context.summary,
             auto_terms=json.dumps(context.terms, ensure_ascii=False),
             context_key=context_key,
+            domain=context.domain,
         )
         with self._connect() as conn:
             conn.execute("DELETE FROM glossary_cache WHERE video_id = ?", (video_id,))
@@ -234,4 +264,39 @@ class Store:
             terms = json.loads(job.get("auto_terms") or "{}")
         except json.JSONDecodeError:
             terms = {}
-        return VideoContext(summary=job.get("summary") or "", terms=terms)
+        return VideoContext(
+            summary=job.get("summary") or "", terms=terms, domain=job.get("domain") or ""
+        )
+
+    # -- terminology lookups ------------------------------------------------
+    def get_lookups(self, api: str, titles) -> dict[str, str | None]:
+        titles = list(titles)
+        if not titles:
+            return {}
+        now = time.time()
+        out: dict[str, str | None] = {}
+        with self._connect() as conn:
+            for i in range(0, len(titles), 500):
+                chunk = titles[i : i + 500]
+                marks = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    f"SELECT title, result, fetched_at FROM term_lookups "
+                    f"WHERE api = ? AND title IN ({marks})",
+                    [api, *chunk],
+                ).fetchall()
+                for r in rows:
+                    if r["result"] is None and now - r["fetched_at"] > _MISS_TTL_S:
+                        continue
+                    out[r["title"]] = r["result"]
+        return out
+
+    def save_lookups(self, api: str, results: dict[str, str | None]) -> None:
+        now = time.time()
+        with self._connect() as conn:
+            conn.executemany(
+                "INSERT INTO term_lookups (api, title, result, fetched_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(api, title) DO UPDATE SET result = excluded.result, "
+                "fetched_at = excluded.fetched_at",
+                [(api, t, r, now) for t, r in results.items()],
+            )
+

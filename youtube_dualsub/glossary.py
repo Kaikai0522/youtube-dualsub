@@ -1,18 +1,20 @@
-"""Terminology control, in three layers of decreasing authority.
+"""Terminology control, in two layers of decreasing authority.
 
-    user.yaml            hand-written, always wins
-    <domain>.yaml        curated per subject area (Minecraft ships by default)
-    auto-extracted       what the LLM guessed from this one video
+    <file>.yaml          optional, hand-written overrides (user.yaml); always win
+    auto-extracted       found in this video, grounded in wiki titles (terms.py)
 
-The ordering matters more than it looks. Asked to translate "creeper", a
-general-purpose model will confidently produce 爬行者 — a perfectly reasonable
-rendering that no Traditional Chinese Minecraft player has ever used. The
-curated layer exists precisely to overrule the model's confidence, so
-auto-extracted terms must never be able to outrank it.
+Nothing here has to be written by hand any more. The auto layer used to be
+the model's own guesses, which is why a hand-made Minecraft glossary once
+shipped: asked for "creeper", a general-purpose model confidently produced
+爬行者, a name no Taiwanese player uses. The wiki grounding in ``terms.py``
+fixed that without a list, for any subject. ``user.yaml`` remains for the rare
+name you want rendered your own way.
 
-Auto-extracted terms are also scoped to a single video and never persisted
-across videos (decision Q28): a term guessed wrong once should not quietly
-poison every future translation, especially since the user has no way to notice.
+Auto-extracted terms are scoped to a single video and never persisted across
+videos (decision Q28): a term guessed wrong once should not quietly poison
+every future translation. (Wiki *lookups* are cached across videos; they are
+facts about the wiki, not guesses about a video.)
+
 
 Each entry may list ``aliases`` — renderings the model is *known* to reach for.
 Those get rewritten to the canonical term after translation, which catches the

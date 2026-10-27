@@ -22,6 +22,7 @@ class Stage(str, Enum):
     AUDIO = "audio"
     VOCALS = "vocals"
     ASR = "asr"
+    DIARIZE = "diarize"
     SENTENCES = "sentences"
     CONTEXT = "context"
     TRANSLATE = "translate"
@@ -36,6 +37,7 @@ STAGE_ORDER: tuple[Stage, ...] = (
     Stage.AUDIO,
     Stage.VOCALS,
     Stage.ASR,
+    Stage.DIARIZE,
     Stage.SENTENCES,
     Stage.CONTEXT,
     Stage.TRANSLATE,
@@ -45,8 +47,8 @@ STAGE_ORDER: tuple[Stage, ...] = (
 
 class TranslationStatus(str, Enum):
     OK = "ok"
-    #: The batch could not be aligned or the LLM never answered; the English
-    #: source is shown instead of a guess (decision Q19).
+    #: The batch could not be aligned or the LLM never answered; the source
+    #: line is shown instead of a guess (decision Q19).
     SOURCE_FALLBACK = "source_fallback"
 
 
@@ -56,6 +58,8 @@ class Word:
     end: float
     text: str
     probability: float = 1.0
+    #: Set by diarization; None when unknown.
+    speaker: str | None = None
 
 
 @dataclass(slots=True)
@@ -67,6 +71,8 @@ class Fragment:
     text: str
     words: list[Word] = field(default_factory=list)
     no_speech_prob: float = 0.0
+    avg_logprob: float = 0.0
+    speaker: str | None = None
 
 
 @dataclass(slots=True)
@@ -75,8 +81,8 @@ class Sentence:
     start: float
     end: float
     text: str
-    #: Reserved for diarization (decision Q26): the field and its rendering
-    #: exist now so adding pyannote later touches one stage, not the pipeline.
+    #: "1", "2", … from diarization, numbered by first appearance; None when
+    #: diarization is off or the line falls outside every speaker turn.
     speaker: str | None = None
 
     @property
@@ -114,6 +120,9 @@ class VideoContext:
     summary: str = ""
     #: source term -> preferred zh-TW rendering, auto-extracted from this video only.
     terms: dict[str, str] = field(default_factory=dict)
+    #: What the video is about in a few words ("Minecraft"), which decides the
+    #: domain wiki that terms are looked up in.
+    domain: str = ""
 
 
 @dataclass(slots=True)

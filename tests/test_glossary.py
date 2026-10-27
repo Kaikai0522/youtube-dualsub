@@ -74,7 +74,8 @@ def test_a_missing_glossary_file_is_not_an_error(curated):
     assert load_glossary(settings_with("nope.yaml")).prompt_terms == {}
 
 
-def test_the_shipped_minecraft_glossary_loads():
-    g = load_glossary(Settings())
-    assert g.prompt_terms["creeper"] == "苦力怕"
-    assert apply_glossary("末影珍珠", g) == "終界珍珠"
+def test_no_hand_written_domain_glossary_ships_by_default():
+    """Terminology is extracted per video; only the user's overrides load."""
+    assert Settings().postprocess.glossary_files == ("user.yaml",)
+    assert not load_glossary(Settings())
+

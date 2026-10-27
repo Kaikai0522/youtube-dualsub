@@ -81,7 +81,9 @@ def sentences(n: int) -> list[Sentence]:
 def small_batches(**overrides) -> Settings:
     return _merge(
         Settings(),
-        {"translate": {"batch_size": 2, "min_batch_size": 2, "max_retries": 1, **overrides}},
+        {"translate": {
+            "batch_size": 2, "min_batch_size": 2, "max_retries": 1, "parallel": 1, **overrides,
+        }},
     )
 
 
@@ -145,8 +147,12 @@ def test_one_bad_batch_does_not_poison_the_rest():
 
 def test_context_and_glossary_reach_the_prompt():
     client = FakeClient([{"1": "一", "2": "二"}])
+    lines = [
+        Sentence(index=0, start=0, end=1, text="He ate a gapple."),
+        Sentence(index=1, start=1, end=2, text="A Creeper blew up."),
+    ]
     translate_sentences(
-        sentences(2),
+        lines,
         VideoContext(summary="A Minecraft manhunt.", terms={"gapple": "金蘋果"}),
         small_batches(),
         glossary={"creeper": "苦力怕"},
@@ -156,7 +162,58 @@ def test_context_and_glossary_reach_the_prompt():
     prompt = client.prompts[0]
     assert "A Minecraft manhunt." in prompt
     assert "gapple -> 金蘋果" in prompt
-    assert "creeper -> 苦力怕" in prompt
+    assert "creeper -> 苦力怕" in prompt, "matching is case-insensitive"
+
+
+def test_only_the_terms_a_batch_uses_are_sent():
+    """Eighty terms with every batch cost prefill time and dilute the four that matter."""
+    client = FakeClient([{"1": "一", "2": "二"}])
+    translate_sentences(
+        sentences(2),
+        VideoContext(terms={"line": "行", "nether": "地獄", "ツナ": "ツナ"}),
+        small_batches(),
+        client=client,
+    )
+
+    prompt = client.prompts[0]
+    assert "line -> 行" in prompt
+    assert "nether" not in prompt
+    assert "ツナ" not in prompt
+
+
+def test_japanese_terms_match_without_word_boundaries():
+    client = FakeClient([{"1": "一"}])
+    translate_sentences(
+        [Sentence(index=0, start=0, end=1, text="ツナ見て、ほら")],
+        VideoContext(terms={"ツナ": "ツナ"}),
+        small_batches(),
+        language="ja",
+        client=client,
+    )
+    assert "ツナ -> ツナ" in client.prompts[0]
+
+
+def test_the_lines_that_follow_a_batch_are_shown_but_not_translated():
+    """A caption line that stops mid-sentence needs the rest of the sentence."""
+    client = FakeClient([{"1": "一", "2": "二"}, {"1": "三", "2": "四"}])
+    translate_sentences(sentences(4), VideoContext(), small_batches(), client=client)
+
+    before, lines = client.prompts[0].split("Lines:")
+    assert "Do not translate them" in before
+    assert "line 2" in before and "line 3" in before
+    assert "line 2" not in lines
+
+
+def test_the_source_language_shapes_the_system_prompt():
+    client = FakeClient([{"1": "一", "2": "二"}])
+    translate_sentences(
+        sentences(2), VideoContext(), small_batches(), language="ja", client=client
+    )
+
+    system = client.systems[0]
+    assert "from Japanese" in system
+    assert "先輩" in system
+
 
 
 def test_previous_lines_are_carried_forward_for_continuity():
@@ -178,3 +235,43 @@ def test_the_hard_constraints_are_always_in_the_system_prompt():
     assert "CARRY THE TONE" in system
     assert "WHEN UNSURE, STAY LITERAL" in system
     assert "Simplified" in system
+
+
+class TestParallelLanes:
+    def test_lanes_are_contiguous_runs_of_batches(self):
+        from youtube_dualsub.pipeline.translate import _lanes
+
+        assert _lanes(list(range(10)), 4) == [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9]]
+        assert _lanes(list(range(2)), 4) == [[0], [1]]
+        assert _lanes([0], 4) == [[0]]
+
+    def test_concurrent_lanes_still_translate_every_line_in_order(self):
+        client = FakeClient([{"1": "甲", "2": "乙"}] * 4)
+        emitted: list[int] = []
+
+        result = translate_sentences(
+            sentences(8), VideoContext(), small_batches(parallel=4),
+            client=client, on_batch=lambda b: emitted.extend(t.index for t in b),
+        )
+
+        assert [t.index for t in result] == list(range(8))
+        assert sorted(emitted) == list(range(8))
+        assert all(t.status is TranslationStatus.OK for t in result)
+
+    def test_a_cancellation_in_one_lane_stops_the_others(self):
+        class Stop(Exception):
+            pass
+
+        client = FakeClient([{"1": "甲", "2": "乙"}] * 16)
+        calls = {"n": 0}
+
+        def on_batch(batch):
+            calls["n"] += 1
+            raise Stop()
+
+        with pytest.raises(Stop):
+            translate_sentences(
+                sentences(32), VideoContext(), small_batches(parallel=2),
+                client=client, on_batch=on_batch,
+            )
+        assert len(client.prompts) < 16, "lanes stopped instead of finishing the video"
