@@ -30,6 +30,7 @@ import re
 from typing import Sequence
 
 from ..config import Settings
+from ..lang import is_cjk, is_cjk_char, join
 from ..models import Cue, Sentence, Translation, TranslationStatus
 
 #: Never emit a cue shorter than this, even between two touching sentences.
@@ -53,7 +54,7 @@ def build_cues(
     for sentence in sentences:
         translation = by_index.get(sentence.index)
         if translation is None:
-            # Not translated yet (streaming) or dropped: the English still has value.
+            # Not translated yet (streaming) or dropped: the original still has value.
             cues.append(
                 Cue(
                     start=sentence.start,
@@ -80,7 +81,7 @@ def build_cues(
     cues.sort(key=lambda c: (c.start, c.end))
     cues = _merge_short(cues, cfg.merge_below_s, cfg.max_duration_s, cfg.merge_max_gap_s)
     cues = _rejoin_severed(cues, protect, cfg.merge_max_gap_s)
-    cues = _split_long(cues, cfg.max_chars_zh, cfg.max_chars_en, protect)
+    cues = _split_long(cues, cfg.max_chars_zh, cfg.max_chars_en, protect, cfg.max_chars_ja)
     return _clamp(cues, cfg.max_duration_s, cfg.min_duration_s, cfg.cue_gap_s)
 
 
@@ -127,15 +128,35 @@ def _adjacent(a: Cue, b: Cue, max_duration: float, max_gap: float) -> bool:
     )
 
 
-def _join(a: Cue, b: Cue) -> Cue:
+def _join(a: Cue, b: Cue, *, separate: bool = True) -> Cue:
+    """One cue out of two.
+
+    ``separate`` keeps two utterances visibly apart: in Chinese and Japanese,
+    where nothing else would, a space goes between them unless punctuation
+    already does the job (初めて話してる 話したことないよ). Without it the pair
+    read as one sentence, and the splitter, seeing no mark, cut mid-word
+    (話したことな / いよ). Repairing a severed word joins with no space.
+    """
+    source, target = join(a.source, b.source), _join_text(a.target, b.target, cjk=True)
+    if separate:
+        source = _spaced(a.source, b.source) or source
+        target = _spaced(a.target, b.target) or target
     return Cue(
         start=a.start,
         end=max(a.end, b.end),
-        source=_join_text(a.source, b.source, cjk=False),
-        target=_join_text(a.target, b.target, cjk=True),
+        source=source,
+        target=target,
         speaker=a.speaker or b.speaker,
         translated=a.translated and b.translated,
     )
+
+
+def _spaced(a: str, b: str) -> str | None:
+    """``a b`` when both sides are CJK and nothing marks the break, else None."""
+    a, b = a.strip(), b.strip()
+    if a and b and is_cjk_char(a[-1]) and is_cjk_char(b[0]):
+        return f"{a} {b}"
+    return None
 
 
 def _join_text(a: str, b: str, *, cjk: bool) -> str:
@@ -167,7 +188,7 @@ def _rejoin_severed(cues: list[Cue], protect: Sequence[str], max_gap: float) -> 
         # after this and will re-divide both the text and its time.
         joinable = (cue.start - prev.end) <= max_gap and prev.speaker == cue.speaker
         if joinable and _severs_a_word(prev.target, cue.target, protect):
-            out[-1] = _join(prev, cue)
+            out[-1] = _join(prev, cue, separate=False)
         else:
             out.append(cue)
     return out
@@ -190,24 +211,36 @@ def _severs_a_word(before: str, after: str, protect: Sequence[str]) -> bool:
 # 2. split
 # --------------------------------------------------------------------------
 
-_CJK_BREAKS = "，。！？；：、,.!?;:"
+_CJK_BREAKS = "，。！？；：、,.!?;: "
 
 
 def _split_long(
-    cues: list[Cue], max_zh: int, max_en: int, protect: Sequence[str] = ()
+    cues: list[Cue],
+    max_zh: int,
+    max_en: int,
+    protect: Sequence[str] = (),
+    max_ja: int | None = None,
 ) -> list[Cue]:
     out: list[Cue] = []
     for cue in cues:
+        cjk_source = is_cjk(cue.source)
+        max_src = (max_ja or max_zh) if cjk_source else max_en
         parts_zh = _split_cjk(cue.target, max_zh, protect) if cue.target else []
         n = len(parts_zh)
-        if n <= 1 and len(cue.source) <= max_en:
+        if n <= 1 and len(cue.source) <= max_src:
             out.append(cue)
             continue
         if n <= 1:
-            # Untranslated but very long English: split on the English alone.
-            parts_en = _split_words(cue.source, max_en)
+            # Untranslated but very long source: split on the source alone.
+            parts_en = (
+                _split_cjk(cue.source, max_src, protect)
+                if cjk_source
+                else _split_words(cue.source, max_src)
+            )
             n = len(parts_en)
             parts_zh = [""] * n
+        elif cjk_source:
+            parts_en = _distribute_chars(cue.source, [len(p) for p in parts_zh], protect)
         else:
             parts_en = _distribute_words(cue.source, [len(p) for p in parts_zh])
 
@@ -236,8 +269,9 @@ def _split_long(
     return out
 
 
-#: Latin words, numbers and version-like tokens must survive intact too.
-_ATOMIC = re.compile(r"[A-Za-z][A-Za-z'’\-]*|\d+(?:[.,:]\d+)*%?")
+#: Latin words, numbers and version-like tokens must survive intact too, and
+#: so must katakana words: カー / ドゲーム reads as a mistake.
+_ATOMIC = re.compile(r"[A-Za-z][A-Za-z'’\-]*|\d+(?:[.,:]\d+)*%?|[ァ-ヺー]{2,}")
 
 
 def _forbidden_cuts(text: str, protect: Sequence[str]) -> set[int]:
@@ -364,9 +398,42 @@ def _distribute_words(text: str, weights: list[int]) -> list[str]:
     return parts
 
 
+def _distribute_chars(text: str, weights: list[int], protect: Sequence[str] = ()) -> list[str]:
+    """Cut Japanese source text into pieces sized in proportion to the Chinese.
+
+    There are no spaces to cut at, so each cut goes to the punctuation mark or
+    space nearest the proportional point, and never inside a protected word.
+    """
+    n = len(weights)
+    text = text.strip()
+    if n <= 1 or len(text) < n:
+        return [text] + [""] * (n - 1)
+
+    forbidden = _forbidden_cuts(text, protect)
+    total = sum(weights) or n
+    cuts: list[int] = []
+    consumed = 0
+    for weight in weights[:-1]:
+        consumed += weight
+        ideal = round(len(text) * consumed / total)
+        lo = (cuts[-1] + 1) if cuts else 1
+        window = range(max(lo, ideal - 4), min(len(text) - 1, ideal + 4) + 1)
+        preferred = [
+            i for i in window
+            if (text[i - 1] in _CJK_BREAKS or text[i - 1].isspace()) and i - 1 not in forbidden
+        ]
+        allowed = [i for i in window if i - 1 not in forbidden]
+        pool = preferred or allowed or [min(max(lo, ideal), len(text) - 1)]
+        cuts.append(min(pool, key=lambda i: abs(i - ideal)))
+
+    bounds = [0, *cuts, len(text)]
+    return [text[a:b].strip() for a, b in zip(bounds, bounds[1:])]
+
+
 # --------------------------------------------------------------------------
 # 3. clamp
 # --------------------------------------------------------------------------
+
 
 def _clamp(cues: list[Cue], max_duration: float, min_duration: float, gap: float) -> list[Cue]:
     out: list[Cue] = []

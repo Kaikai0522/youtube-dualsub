@@ -77,19 +77,15 @@ def write_ass(cues: list[Cue], path: Path, settings: Settings, *, title: str = "
 
 
 def _ordered_lines(cue: Cue, settings: Settings) -> list[str]:
-    prefix = ""
-    if settings.style.show_speaker_prefix and cue.speaker:
-        prefix = f"{cue.speaker}: "
-
     zh = cue.target.strip()
     en = cue.source.strip()
     if not zh and not en:
         return []
     if not zh:
-        return [prefix + en]
+        return [en]
     if not en:
-        return [prefix + zh]
-    return [prefix + zh, en] if settings.style.zh_on_top else [prefix + en, zh]
+        return [zh]
+    return [zh, en] if settings.style.zh_on_top else [en, zh]
 
 
 def _srt_time(seconds: float) -> str:

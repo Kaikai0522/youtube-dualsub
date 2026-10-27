@@ -23,7 +23,8 @@ from .export import write_ass, write_srt
 from .jobs import JobManager, initial_events, stage_label
 from .models import VideoContext
 from .pipeline import shape
-from .pipeline.orchestrator import protected_terms
+from .pipeline.orchestrator import context_key, protected_terms
+
 from .store import Store
 
 log = logging.getLogger(__name__)
@@ -189,9 +190,7 @@ def export(video_id: str, fmt: str) -> PlainTextResponse:
     translations = store().load_translations(
         video_id, s.asr_fingerprint, s.translation_fingerprint
     )
-    context = store().load_context(
-        video_id, f"{s.asr_fingerprint}|{s.context.model or s.translate.model}"
-    )
+    context = store().load_context(video_id, context_key(s))
     cues = shape.build_cues(
         sentences, translations, s,
         protect=protected_terms(s, context or VideoContext()),

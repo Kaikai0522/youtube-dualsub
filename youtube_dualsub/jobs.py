@@ -34,7 +34,8 @@ def cue_json(cue: Cue) -> dict[str, Any]:
         "zh": cue.target,
         "en": cue.source,
         "t": cue.translated,
-        **({"sp": cue.speaker} if cue.speaker else {}),
+        # Only marks turn boundaries; the overlay never shows it.
+        "sp": cue.speaker,
     }
 
 
@@ -209,6 +210,7 @@ def stage_label(stage: str) -> str:
         Stage.AUDIO.value: "Fetching audio",
         Stage.VOCALS.value: "Isolating vocals",
         Stage.ASR.value: "Transcribing",
+        Stage.DIARIZE.value: "Telling speakers apart",
         Stage.SENTENCES.value: "Rebuilding sentences",
         Stage.CONTEXT.value: "Reading the transcript",
         Stage.TRANSLATE.value: "Translating",

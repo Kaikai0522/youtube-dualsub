@@ -74,7 +74,7 @@ class TestMerging:
         cues = shape.build_cues(sentences, translations, settings())
 
         assert len(cues) == 2
-        assert cues[0].target == "衝衝衝"
+        assert cues[0].target == "衝 衝 衝", "merged utterances stay visibly apart"
         assert cues[0].source == "go go go"
         assert cues[0].end <= cues[1].start
 
@@ -84,7 +84,7 @@ class TestMerging:
             sentences, [translation(0, "好險"), translation(1, "對啊")], settings()
         )
         assert len(cues) == 1
-        assert cues[0].target == "好險對啊"
+        assert cues[0].target == "好險 對啊"
 
 
 class TestSplitting:
@@ -226,3 +226,44 @@ class TestUntranslated:
         assert cues[0].source == "we're cooked"
         assert cues[0].target == ""
         assert cues[0].translated is False
+
+
+class TestJapaneseSource:
+    def test_merged_japanese_lines_are_not_spaced(self):
+        sentences = [sentence(0, 0.0, 0.4, "え？"), sentence(1, 0.5, 2.5, "何これ？")]
+        cues = shape.build_cues(sentences, [translation(0, "咦？"), translation(1, "這什麼？")], settings())
+        assert cues[0].source == "え？何これ？"
+
+    def test_a_long_japanese_line_is_split_with_its_translation(self):
+        ja = "今日は大冒険ってことですね、めちゃくちゃ大冒険です、なのでクーラーの温度下げてくださいね"
+        zh = "所以今天是大冒險對吧，超級大冒險，所以請把冷氣的溫度調低一點喔拜託了"
+        cues = shape.build_cues([sentence(0, 0.0, 8.0, ja)], [translation(0, zh)], settings())
+
+        assert len(cues) >= 2
+        assert "".join(c.source for c in cues) == ja, "no character lost or duplicated"
+        assert all(len(c.source) <= Settings().shape.max_chars_ja for c in cues)
+        assert all(" " not in c.source for c in cues)
+
+    def test_the_japanese_cut_lands_on_punctuation_near_the_proportional_point(self):
+        parts = shape._distribute_chars("あいうえお、かきくけこ", [5, 5])
+        assert parts == ["あいうえお、", "かきくけこ"]
+
+    def test_merged_cross_talk_is_spaced_and_split_at_the_space(self):
+        """VlaTbwhSSqk: three sub-second lines from fast cross-talk. Glued
+        without a mark they read as one sentence and were cut mid-word
+        (話したことな / いよ)."""
+        lines = [("初めて話してる", "是第一次說話"), ("話したことないよ", "根本沒說過話啦"),
+                 ("全然私友達じゃないやん", "我根本不是你的朋友嘛")]
+        sentences = [sentence(i, 32.5 + 0.5 * i, 32.9 + 0.5 * i, ja) for i, (ja, _) in enumerate(lines)]
+        translations = [translation(i, zh) for i, (_, zh) in enumerate(lines)]
+
+        cues = shape.build_cues(sentences, translations, settings())
+
+        joined = " ".join(c.source for c in cues)
+        assert all(ja in joined for ja, _ in lines), [c.source for c in cues]
+        assert all(zh in " ".join(c.target for c in cues) for _, zh in lines)
+
+    def test_a_katakana_word_is_never_cut(self):
+        """The proportional point falls inside カードゲーム; it used to cut there."""
+        parts = shape._distribute_chars("なんかカードゲームはしたことあるけどさ", [5, 15])
+        assert parts == ["なんか", "カードゲームはしたことあるけどさ"]

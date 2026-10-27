@@ -7,6 +7,7 @@ far faster than from an overlay. Get this producing good subtitles first.
     uv run dualsub IqcS1d3eXYc --export srt
     uv run dualsub IqcS1d3eXYc --no-vocals --retranslate     # A/B the Demucs switch
     uv run dualsub IqcS1d3eXYc --model qwen3:14b --retranslate
+    uv run dualsub TknDC6_prsU --language ja                  # Japanese, forced
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ import sys
 import time
 
 from .config import Settings, ensure_dirs, load_settings
+from .lang import language_name
+
 from .models import Stage, TranslationStatus
 from .pipeline.orchestrator import Cancelled, JobResult, Orchestrator, export_result
 from .pipeline.postprocess import simplified_ratio
@@ -38,7 +41,7 @@ def parse_video_id(value: str) -> str:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="dualsub",
-        description="Generate bilingual (source + Traditional Chinese) subtitles locally.",
+        description="Generate bilingual (original + Traditional Chinese) subtitles locally.",
     )
     p.add_argument("video", type=parse_video_id, help="YouTube video id or URL")
     p.add_argument(
@@ -47,11 +50,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--model", help="override the translation model, e.g. qwen3:14b")
     p.add_argument("--asr-model", help="override the Whisper model, e.g. large-v3-turbo")
-    p.add_argument("--language", help="source language code, or 'auto' to detect")
+    p.add_argument(
+        "--language",
+        help="spoken language, e.g. ja or en (default: what YouTube reports, else detect)",
+    )
     p.add_argument("--no-vocals", action="store_true", help="skip Demucs vocal isolation")
     p.add_argument("--vocals", action="store_true", help="force Demucs vocal isolation on")
     p.add_argument("--no-opencc", action="store_true", help="skip Simplified->Traditional cleanup")
     p.add_argument("--no-context", action="store_true", help="skip the whole-video summary pass")
+    p.add_argument("--no-wiki", action="store_true",
+                   help="do not look terminology up online; trust the model's renderings")
     p.add_argument("--no-manual-captions", action="store_true",
                    help="always transcribe, even when human captions exist")
     p.add_argument("--retranslate", action="store_true",
@@ -77,6 +85,8 @@ def _overrides(args: argparse.Namespace) -> dict:
         out.setdefault("postprocess", {})["opencc_enabled"] = False
     if args.no_context:
         out.setdefault("context", {})["enabled"] = False
+    if args.no_wiki:
+        out.setdefault("context", {})["wiki_lookup"] = False
     if args.no_manual_captions:
         out.setdefault("audio", {})["prefer_manual_captions"] = False
     return out
@@ -165,6 +175,7 @@ def _report(result: JobResult, settings: Settings, written: list[str]) -> None:
     speed = result.duration_s / result.elapsed_s if result.elapsed_s else 0
     print(f"  {speed:.1f}x faster than watching it")
     print()
+    print(f"  spoken language     {language_name(result.language)}")
     print(f"  transcript source   {'human-uploaded captions' if result.used_manual_captions else 'Whisper ' + settings.asr.model}")
     print(f"  vocal isolation     {'on' if settings.vocals.enabled else 'off'}")
     print(f"  translation model   {settings.translate.model}")
@@ -172,9 +183,10 @@ def _report(result: JobResult, settings: Settings, written: list[str]) -> None:
     print()
     print(f"  sentences           {len(result.sentences)}")
     print(f"  subtitles           {len(result.cues)}")
-    print(f"  glossary terms      {len(result.context.terms)} auto-extracted")
+    subject = f" ({result.context.domain})" if result.context.domain else ""
+    print(f"  glossary terms      {len(result.context.terms)} auto-extracted{subject}")
     if fallbacks:
-        print(f"  left in English     {fallbacks}  (translation could not be aligned)")
+        print(f"  untranslated        {fallbacks}  (translation could not be aligned)")
     if zh:
         verdict = "clean" if ratio == 0 else f"{ratio * 100:.1f}% of lines - check these"
         print(f"  Simplified probe    {verdict}")

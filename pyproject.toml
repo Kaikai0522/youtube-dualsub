@@ -1,7 +1,7 @@
 [project]
 name = "youtube-dualsub"
 version = "0.1.0"
-description = "Local bilingual (English + Traditional Chinese) subtitles for YouTube, powered by faster-whisper and a local LLM"
+description = "Local bilingual (Japanese/English + Traditional Chinese) subtitles for YouTube, powered by faster-whisper and a local LLM"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -17,6 +17,8 @@ dependencies = [
     # DLL search path so you never have to install the full CUDA toolkit.
     "nvidia-cublas-cu12>=12.4",
     "nvidia-cudnn-cu12>=9.1,<10",
+    # Speaker diarization, CPU-only ONNX: no torch, no VRAM (pipeline/diarize.py).
+    "sherpa-onnx>=1.12",
 ]
 
 [project.optional-dependencies]

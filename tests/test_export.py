@@ -47,3 +47,14 @@ def test_ass_has_a_style_and_one_dialogue_per_cue(tmp_path):
 def test_srt_timestamps():
     assert _srt_time(0) == "00:00:00,000"
     assert _srt_time(3661.5) == "01:01:01,500"
+
+
+
+def test_speakers_are_not_shown(tmp_path):
+    """Diarization only decides where lines break; it never labels or colours them."""
+    two = [Cue(0.0, 1.0, "え？", "咦？", speaker="1"), Cue(1.0, 2.0, "何これ", "這什麼", speaker="3")]
+    srt = write_srt(two, tmp_path / "a.srt", Settings()).read_text("utf-8")
+    ass = write_ass(two, tmp_path / "a.ass", Settings()).read_text("utf-8")
+
+    assert "<font" not in srt and "3:" not in srt
+    assert r"\c&H" not in ass

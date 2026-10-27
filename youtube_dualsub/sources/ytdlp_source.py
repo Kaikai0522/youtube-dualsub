@@ -9,10 +9,14 @@ Two things live here:
     migration that is killing the DASH audio-only URLs.
 
 ``fetch_manual_subtitles``
-    Only ever returns *human-uploaded* captions. YouTube's auto-captions are
-    deliberately ignored (decision Q2): they carry no punctuation and no
-    casing, and feeding that to an LLM turns small ASR errors into confident
-    Chinese nonsense. Better to spend 3 GPU-minutes on Whisper.
+    Only ever returns *human-uploaded* captions. YouTube's auto-captions never
+    replace Whisper as the transcript (decision Q2).
+
+``fetch_auto_captions``
+    YouTube's auto-captions, used only to fill lines Whisper missed
+    (``pipeline/gapfill.py``). Q2 assumed they carry no punctuation; the
+    Japanese track now does, and against human captions it matched Whisper's
+    accuracy while missing fewer lines.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -45,6 +49,16 @@ class VideoInfo:
     duration_s: float
     has_manual_subs: bool
     manual_sub_langs: tuple[str, ...]
+    #: The language YouTube believes the video is spoken in, e.g. "ja". Often
+    #: set by the uploader; None when YouTube does not know.
+    language: str | None = None
+    description: str = ""
+    tags: tuple[str, ...] = ()
+    #: Raw yt-dlp subtitle track listing, so captions can be fetched without a
+    #: second round trip to YouTube.
+    subtitle_tracks: dict = field(default_factory=dict, repr=False)
+    #: The same for YouTube's auto-generated tracks.
+    auto_caption_tracks: dict = field(default_factory=dict, repr=False)
 
 
 @dataclass(slots=True)
@@ -78,6 +92,7 @@ def _base_opts(cookies_from_browser: str | None) -> dict:
         "noprogress": True,
         "retries": 5,
         "fragment_retries": 10,
+        "socket_timeout": 10,
     }
     if cookies_from_browser:
         opts["cookiesfrombrowser"] = (cookies_from_browser,)
@@ -88,19 +103,29 @@ def probe(video_id: str, *, cookies_from_browser: str | None = None) -> VideoInf
     opts = _base_opts(cookies_from_browser) | {"skip_download": True}
     with _ytdl()(opts) as ydl:
         raw = ydl.extract_info(_url(video_id), download=False)
-    manual = raw.get("subtitles") or {}
+    return info_from_raw(video_id, raw)
+
+
+def info_from_raw(video_id: str, raw: dict) -> VideoInfo:
+    # "live_chat" is listed as a subtitle track but is a chat replay.
+    manual = {k: v for k, v in (raw.get("subtitles") or {}).items() if k != "live_chat"}
     return VideoInfo(
         video_id=video_id,
         title=raw.get("title") or video_id,
-        uploader=raw.get("uploader") or "",
+        uploader=raw.get("uploader") or raw.get("channel") or "",
         duration_s=float(raw.get("duration") or 0.0),
         has_manual_subs=bool(manual),
         manual_sub_langs=tuple(sorted(manual.keys())),
+        language=raw.get("language") or None,
+        description=raw.get("description") or "",
+        tags=tuple(raw.get("tags") or ()),
+        subtitle_tracks=manual,
+        auto_caption_tracks=raw.get("automatic_captions") or {},
     )
 
 
 def fetch_audio(
-    video_id: str,
+    info: VideoInfo,
     dest_dir: Path,
     *,
     format_chain: Iterable[str],
@@ -109,8 +134,8 @@ def fetch_audio(
     progress: ProgressCb | None = None,
 ) -> AudioAsset:
     dest_dir.mkdir(parents=True, exist_ok=True)
+    video_id = info.video_id
 
-    info = probe(video_id, cookies_from_browser=cookies_from_browser)
     if info.duration_s > max_duration_s:
         raise VideoTooLong(
             f"{info.duration_s / 60:.0f} minutes exceeds the {max_duration_s / 60:.0f} minute limit."
@@ -183,27 +208,34 @@ def _find_cached(dest_dir: Path, video_id: str) -> Path | None:
 # --------------------------------------------------------------------------
 
 def fetch_manual_subtitles(
-    video_id: str,
-    language: str,
+    info: VideoInfo,
+    language: str | None,
     *,
     cookies_from_browser: str | None = None,
-) -> list[tuple[float, float, str]] | None:
-    """Return ``(start, end, text)`` triples from human-uploaded captions.
+) -> tuple[str, list[tuple[float, float, str]]] | None:
+    """Return ``(language, cues)`` from human-uploaded captions.
 
-    Returns ``None`` when the video has no manual captions in ``language`` —
-    auto-generated tracks are never considered.
+    Only a track in the language the video is *spoken* in counts. A Japanese
+    video with a human English track would otherwise be transcribed as English:
+    the source line on screen would stop matching what anyone says. When the
+    spoken language is unknown, a video with exactly one manual track is
+    assumed to be captioned in its own language.
+
+    Returns ``None`` when no such track exists — auto-generated tracks are
+    never considered.
     """
-    opts = _base_opts(cookies_from_browser) | {"skip_download": True}
-    with _ytdl()(opts) as ydl:
-        raw = ydl.extract_info(_url(video_id), download=False)
-        tracks = (raw.get("subtitles") or {})
+    tracks = info.subtitle_tracks
+    if language:
         chosen = _pick_language(tracks, language)
-        if chosen is None:
-            return None
+    else:
+        chosen = next(iter(tracks)) if len(tracks) == 1 else None
+    if chosen is None:
+        return None
 
-        entries = tracks[chosen]
-        # json3 carries timing per event and needs no regex archaeology.
-        by_ext = {e.get("ext"): e for e in entries}
+    entries = tracks[chosen]
+    # json3 carries timing per event and needs no regex archaeology.
+    by_ext = {e.get("ext"): e for e in entries}
+    with _ytdl()(_base_opts(cookies_from_browser) | {"skip_download": True}) as ydl:
         for ext in ("json3", "srv3", "vtt"):
             entry = by_ext.get(ext)
             if not entry or not entry.get("url"):
@@ -220,8 +252,61 @@ def fetch_manual_subtitles(
                     "using %d human-uploaded %s captions (%s, collapsed from %d rolling cues)",
                     len(collapsed), chosen, ext, len(cues),
                 )
-                return collapsed
+                return chosen.split("-")[0], collapsed
     return None
+
+
+#: A line of YouTube auto-captions: start, end, and its pieces as
+#: ``(start, text)`` — json3 times each piece with ``tOffsetMs``.
+AutoLine = tuple[float, float, list[tuple[float, str]]]
+
+
+def fetch_auto_captions(
+    info: VideoInfo,
+    language: str | None,
+    *,
+    cookies_from_browser: str | None = None,
+) -> list[AutoLine]:
+    """YouTube's auto-generated captions in the spoken language, or ``[]``.
+
+    Only the original-language track counts: ``ja-orig`` or ``ja``. Every other
+    key (``zh-Hant``, ``ja-ja``) is YouTube machine-translating something.
+    """
+    if not language:
+        return []
+    tracks = info.auto_caption_tracks
+    chosen = next((k for k in (f"{language}-orig", language) if k in tracks), None)
+    if chosen is None:
+        return []
+    entry = next((e for e in tracks[chosen] if e.get("ext") == "json3" and e.get("url")), None)
+    if entry is None:
+        return []
+    with _ytdl()(_base_opts(cookies_from_browser) | {"skip_download": True}) as ydl:
+        payload = ydl.urlopen(entry["url"]).read().decode("utf-8", "replace")
+    lines = _parse_json3_pieces(payload)
+    log.info("fetched %d auto-caption lines (%s)", len(lines), chosen)
+    return lines
+
+
+def _parse_json3_pieces(payload: str) -> list[AutoLine]:
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        return []
+    lines: list[AutoLine] = []
+    for event in data.get("events") or []:
+        segs = event.get("segs")
+        if not segs or "tStartMs" not in event:
+            continue
+        start = float(event["tStartMs"]) / 1000.0
+        pieces = [
+            (start + float(seg.get("tOffsetMs", 0)) / 1000.0, seg.get("utf8", ""))
+            for seg in segs
+            if seg.get("utf8", "").strip()
+        ]
+        if pieces:
+            lines.append((start, start + float(event.get("dDurationMs", 0)) / 1000.0, pieces))
+    return lines
 
 
 def _collapse_rolling(

@@ -4,12 +4,15 @@ Every other stage receives a `Path` and asks no questions. That is deliberate:
 YouTube's SABR migration is actively breaking yt-dlp, and when the browser-side
 MediaSource capture replaces it (Phase 5) the change is confined to this file
 and ``sources/``.
+
+YouTube is asked about a video exactly once. ``probe`` returns everything later
+steps need — duration, spoken language, the manual caption listing — so that
+fetching captions and audio does not repeat a multi-second metadata request.
 """
 
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Callable
 
 from ..config import CACHE_DIR, Settings
@@ -38,7 +41,7 @@ def probe(video_id: str, settings: Settings) -> VideoInfo:
 
 
 def get_audio(
-    video_id: str,
+    info: VideoInfo,
     settings: Settings,
     *,
     progress: ProgressCb | None = None,
@@ -46,11 +49,11 @@ def get_audio(
     if settings.audio.source == "mse":
         from ..sources import mse_source
 
-        path = mse_source.fetch_audio(video_id, CACHE_DIR)
-        return AudioAsset(path=path, info=probe(video_id, settings), format_spec="mse")
+        path = mse_source.fetch_audio(info.video_id, CACHE_DIR)
+        return AudioAsset(path=path, info=info, format_spec="mse")
 
     return ytdlp_source.fetch_audio(
-        video_id,
+        info,
         CACHE_DIR,
         format_chain=settings.audio.format_chain,
         max_duration_s=settings.audio.max_duration_s,
@@ -59,20 +62,38 @@ def get_audio(
     )
 
 
+def spoken_language(info: VideoInfo, settings: Settings) -> str | None:
+    """The configured language, else what YouTube reports, else unknown."""
+    language = settings.asr.language or info.language
+    return language.split("-")[0].lower() if language else None
+
+
+def get_auto_captions(info: VideoInfo, settings: Settings) -> list[ytdlp_source.AutoLine]:
+    """YouTube's auto-captions in the spoken language, or ``[]`` on any failure."""
+    try:
+        return ytdlp_source.fetch_auto_captions(
+            info,
+            spoken_language(info, settings),
+            cookies_from_browser=settings.audio.cookies_from_browser,
+        )
+    except Exception as exc:  # noqa: BLE001 - an optional repair must not kill the job
+        log.warning("auto-caption lookup failed, keeping Whisper's lines only: %s", exc)
+        return []
+
+
 def get_manual_captions(
-    video_id: str, settings: Settings
-) -> list[tuple[float, float, str]] | None:
-    """Human-uploaded captions only, or ``None``.
+    info: VideoInfo, settings: Settings
+) -> tuple[str, list[tuple[float, float, str]]] | None:
+    """``(language, cues)`` from human-uploaded captions only, or ``None``.
 
     When this returns something, the whole audio + Demucs + Whisper chain is
     skipped: a human transcript beats anything we can produce locally, is
     already time-aligned, and costs zero GPU seconds.
     """
-    language = settings.asr.language or "en"
     try:
         return ytdlp_source.fetch_manual_subtitles(
-            video_id,
-            language,
+            info,
+            spoken_language(info, settings),
             cookies_from_browser=settings.audio.cookies_from_browser,
         )
     except Exception as exc:  # noqa: BLE001 - never let a caption probe kill the job

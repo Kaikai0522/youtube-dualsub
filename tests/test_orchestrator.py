@@ -21,6 +21,7 @@ def info() -> VideoInfo:
     return VideoInfo(
         video_id=VIDEO, title="Minecraft Speedrunner Swap VS 3 Hunters",
         uploader="Dream", duration_s=3123.0, has_manual_subs=False, manual_sub_langs=(),
+        language="en",
     )
 
 
@@ -65,7 +66,8 @@ def settings() -> Settings:
         {
             "vocals": {"enabled": False},
             "context": {"enabled": False},
-            "translate": {"batch_size": 2, "min_batch_size": 2},
+            "diarization": {"enabled": False},
+            "translate": {"batch_size": 2, "min_batch_size": 2, "parallel": 1},
         },
     )
 
@@ -81,15 +83,16 @@ def fakes(monkeypatch, tmp_path):
     audio_file = tmp_path / "audio.m4a"
     audio_file.write_bytes(b"not really audio")
 
-    def get_audio(video_id, settings, progress=None):
+    def get_audio(video_info, settings, progress=None):
         calls["audio"] += 1
-        return AudioAsset(path=audio_file, info=info(), format_spec="test")
+        return AudioAsset(path=audio_file, info=video_info, format_spec="test")
 
-    def transcribe(path, settings, duration_s=None, progress=None):
+    def transcribe(path, settings, language=None, prompt=None, duration_s=None, progress=None):
         calls["asr"] += 1
-        return fragments()
+        calls["asr_language"] = language
+        return orch.asr_stage.Transcription(fragments=fragments(), language=language or "en")
 
-    def get_manual_captions(video_id, settings):
+    def get_manual_captions(video_info, settings):
         calls["captions"] += 1
         return None
 
@@ -160,7 +163,9 @@ def test_human_captions_skip_audio_and_whisper_entirely(settings, store, monkeyp
     monkeypatch.setattr(
         orch.audio_stage,
         "get_manual_captions",
-        lambda video_id, s: [(0.0, 1.5, "Wait he's got gapples."), (1.6, 3.0, "We're cooked.")],
+        lambda video_info, s: (
+            "en", [(0.0, 1.5, "Wait he's got gapples."), (1.6, 3.0, "We're cooked.")]
+        ),
     )
 
     result = orch.Orchestrator(settings, store).run(VIDEO)
@@ -169,6 +174,28 @@ def test_human_captions_skip_audio_and_whisper_entirely(settings, store, monkeyp
     assert fakes["asr"] == 0
     assert fakes["audio"] == 0
     assert len(result.cues) >= 1
+
+
+def test_human_caption_lines_are_kept_as_the_human_cut_them(settings, store, monkeypatch, fakes):
+    """A caption line ending mid-sentence stays its own line; nothing is re-glued."""
+    lines = [(0.0, 2.0, "so we're going to head"), (2.0, 4.0, "to the red tower and then")]
+    monkeypatch.setattr(orch.audio_stage, "get_manual_captions", lambda i, s: ("en", lines))
+
+    result = orch.Orchestrator(settings, store).run(VIDEO)
+
+    assert [s.text for s in result.sentences] == [text for _, _, text in lines]
+
+
+def test_the_spoken_language_reaches_whisper_and_is_remembered(settings, store, fakes):
+    result = orch.Orchestrator(settings, store).run(VIDEO)
+
+    assert fakes["asr_language"] == "en", "YouTube's reported language is passed to Whisper"
+    assert result.language == "en"
+    assert store.get_job(VIDEO)["language"] == "en"
+
+    again = orch.Orchestrator(settings, store).run(VIDEO)
+    assert again.language == "en", "a cached transcript still knows its language"
+
 
 
 def test_cancelling_pauses_and_keeps_what_was_finished(settings, store, fakes):
@@ -227,3 +254,50 @@ def test_an_unreachable_llm_degrades_to_english_only(settings, store, fakes, mon
     assert result.cues
     assert all(c.source for c in result.cues)
     assert all(c.target == "" for c in result.cues)
+
+
+class TestSpeakers:
+    @pytest.fixture
+    def diarized(self, settings, monkeypatch, fakes):
+        from youtube_dualsub.pipeline.diarize import Turn
+
+        calls = {"n": 0}
+
+        def fake_diarize(path, settings, progress=None):
+            calls["n"] += 1
+            return [Turn(0.0, 2.5, "1"), Turn(2.9, 5.0, "2")]
+
+        monkeypatch.setattr(orch.diarize_stage, "diarize", fake_diarize)
+        return _merge(settings, {"diarization": {"enabled": True}}), calls
+
+    def test_whisper_lines_carry_their_speaker(self, diarized, store):
+        settings, _ = diarized
+        result = orch.Orchestrator(settings, store).run(VIDEO)
+
+        assert [s.speaker for s in result.sentences] == ["1", "1", "2"]
+        assert store.load_sentences(VIDEO, settings.asr_fingerprint)[2].speaker == "2"
+
+    def test_caption_lines_get_their_speaker_from_the_audio(self, diarized, store, monkeypatch, fakes):
+        settings, calls = diarized
+        monkeypatch.setattr(
+            orch.audio_stage, "get_manual_captions",
+            lambda i, s: ("en", [(0.0, 2.0, "Wait he's got gapples."), (3.0, 4.5, "Go!")]),
+        )
+
+        result = orch.Orchestrator(settings, store).run(VIDEO)
+
+        assert fakes["audio"] == 1, "captions need the audio for speakers"
+        assert fakes["asr"] == 0
+        assert [s.speaker for s in result.sentences] == ["1", "2"]
+
+    def test_a_diarization_failure_only_costs_the_speakers(self, diarized, store, monkeypatch):
+        settings, _ = diarized
+
+        def broken(*a, **k):
+            raise RuntimeError("model download failed")
+
+        monkeypatch.setattr(orch.diarize_stage, "diarize", broken)
+        result = orch.Orchestrator(settings, store).run(VIDEO)
+
+        assert result.cues
+        assert all(s.speaker is None for s in result.sentences)
