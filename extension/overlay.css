@@ -51,6 +51,20 @@
   font-weight: 400;
 }
 
+/* Japanese in a Chinese font gets the Chinese forms of shared kanji (直, 骨);
+   the content script tags the source line with lang="ja" when it has kana. */
+#dualsub-overlay .dualsub-en:lang(ja) {
+  font-family: "Yu Gothic UI", "Meiryo", "Hiragino Sans", "Noto Sans JP", sans-serif;
+}
+
+/* The previous speaker's line, held above the reply in fast cross-talk.
+   Dimmed and smaller so it reads as "already said", not as the current voice. */
+#dualsub-overlay .dualsub-prev {
+  opacity: 0.55;
+  font-weight: 400;
+  margin-bottom: 4px;
+}
+
 #dualsub-overlay .dualsub-line:empty {
   display: none;
 }
@@ -126,6 +140,19 @@
   width: 0;
   background: #3ea6ff;
   transition: width 300ms linear;
+}
+
+/* Working, but the backend cannot say how far along (loading a model,
+   looking the video up). */
+#dualsub-status .dualsub-bar.dualsub-indeterminate > i {
+  width: 30% !important;
+  transition: none;
+  animation: dualsub-sweep 1.2s ease-in-out infinite;
+}
+
+@keyframes dualsub-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
 }
 
 #dualsub-status.dualsub-error {

@@ -1,8 +1,8 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-Hant-TW">
   <head>
     <meta charset="utf-8" />
-    <title>YouTube DualSub</title>
+    <title>雙語字幕</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -26,27 +26,39 @@
         width: 300px;
         margin: 0;
         padding: 14px;
-        font: 13px/1.45 system-ui, "Microsoft JhengHei", sans-serif;
+        font: 13px/1.5 "Microsoft JhengHei", system-ui, sans-serif;
         color: var(--fg);
       }
       h1 {
         margin: 0 0 2px;
-        font-size: 14px;
+        font-size: 15px;
+      }
+      h2 {
+        margin: 16px 0 0;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        color: var(--muted);
       }
       .status {
-        margin-bottom: 12px;
+        margin-bottom: 4px;
         color: var(--muted);
       }
       .status.ok { color: var(--good); }
       .status.bad { color: var(--bad); }
+      .status code {
+        font-size: 12px;
+        user-select: all;
+      }
       label {
         display: block;
-        margin: 12px 0 4px;
+        margin: 10px 0 4px;
         font-weight: 600;
       }
       select, input[type="range"] {
         width: 100%;
         box-sizing: border-box;
+        accent-color: var(--accent);
       }
       select {
         padding: 5px;
@@ -55,16 +67,19 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-top: 12px;
+        margin-top: 10px;
+      }
+      .row input {
+        accent-color: var(--accent);
       }
       .row label {
         margin: 0;
         font-weight: 400;
       }
       .hint {
-        margin-top: 4px;
+        margin-top: 3px;
         color: var(--muted);
-        font-size: 11px;
+        font-size: 11.5px;
       }
       hr {
         margin: 14px 0 0;
@@ -76,35 +91,54 @@
         color: var(--muted);
         font-weight: 400;
       }
+      fieldset {
+        margin: 0;
+        padding: 0;
+        border: 0;
+      }
+      fieldset:disabled {
+        opacity: 0.5;
+      }
     </style>
   </head>
   <body>
-    <h1>YouTube DualSub</h1>
-    <div class="status" id="status">Checking the local backend…</div>
+    <h1>雙語字幕</h1>
+    <div class="status" id="status">正在連線到本機後端…</div>
 
-    <label for="model">Translation model</label>
-    <select id="model"></select>
-    <div class="hint">Changing this does not re-run transcription — only the translation.</div>
+    <h2>顯示</h2>
 
-    <label for="font">Chinese font size <span class="value" id="fontValue"></span></label>
+    <label for="font">中文字級 <span class="value" id="fontValue"></span></label>
     <input id="font" type="range" min="14" max="64" step="1" />
 
-    <div class="row">
-      <input id="opencc" type="checkbox" />
-      <label for="opencc">Force Traditional Chinese (OpenCC s2twp)</label>
-    </div>
-    <div class="hint">
-      Turn this off to see whether the model really needs it.
-    </div>
+    <label for="fontEn">原文字級 <span class="value" id="fontEnValue"></span></label>
+    <input id="fontEn" type="range" min="12" max="48" step="1" />
 
     <div class="row">
-      <input id="context" type="checkbox" />
-      <label for="context">Read the whole video first (summary + glossary)</label>
+      <input id="zhOnTop" type="checkbox" />
+      <label for="zhOnTop">中文在上、原文在下</label>
     </div>
-    <div class="hint">
-      Off is faster but each batch is translated blind, so names and jargon drift
-      over a long video. Changing this re-runs translation, not transcription.
-    </div>
+
+    <h2>翻譯</h2>
+
+    <fieldset id="backendSettings">
+      <label for="model">翻譯模型</label>
+      <select id="model"></select>
+      <div class="hint">換模型只會重新翻譯，不會重新辨識語音。</div>
+
+      <div class="row">
+        <input id="opencc" type="checkbox" />
+        <label for="opencc">強制轉成台灣正體（OpenCC s2twp）</label>
+      </div>
+      <div class="hint">關掉可以看出模型本身是否會混入簡體字。</div>
+
+      <div class="row">
+        <input id="context" type="checkbox" />
+        <label for="context">先通讀全片（摘要＋專有名詞表）</label>
+      </div>
+      <div class="hint">
+        關掉比較快，但每批都是盲翻，長片的人名和術語容易前後不一。切換只會重新翻譯。
+      </div>
+    </fieldset>
 
     <hr />
     <div class="hint" id="footer"></div>
