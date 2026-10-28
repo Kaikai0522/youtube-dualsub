@@ -230,9 +230,13 @@ class TranslateConfig:
     # Batch size barely matters for speed (96 lines: 0.175 s/line at 8 and at
     # 32); generation is the bottleneck. Concurrent requests are what help:
     # Ollama decodes them together, 1.5x faster at 2 and 1.8x at 4, with no
-    # extra VRAM.
+    # extra VRAM. Needs OLLAMA_NUM_PARALLEL >= this on the server (start.ps1
+    # sets it); otherwise the extra requests just queue. On v-V9NpCvPDk (736
+    # lines, 2026-10-28): 71.6 s at 4, 64.3 s at 6, 62.5 s at 8, 60.0 s at 8
+    # with num_ctx 4096, 55.8 s with an 8-bit KV cache (OLLAMA_KV_CACHE_TYPE,
+    # also set by start.ps1). The GPU is close to saturated, so more will not help.
     batch_size: int = 16
-    parallel: int = 4
+    parallel: int = 8
 
     # The ladder must be able to reach one line: measured on this video, every
     # sentence translates correctly on its own, including the ones that make a
@@ -251,7 +255,10 @@ class TranslateConfig:
     context_pairs: int = 6
     lookahead_lines: int = 3
     temperature: float = 0.3
-    num_ctx: int = 8192
+    # Per request slot; Ollama reserves num_ctx x OLLAMA_NUM_PARALLEL. The
+    # largest translation prompt measured was 982 tokens plus a ~1100-token
+    # answer budget for 16 lines, so 4096 leaves room.
+    num_ctx: int = 4096
     # Bump when the prompt changes so cached translations are invalidated.
     prompt_version: str = "v2"
     target_language: str = "繁體中文（台灣）"

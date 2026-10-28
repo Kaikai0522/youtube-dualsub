@@ -209,6 +209,11 @@ if (Test-Url "http://127.0.0.1:11434/api/version") {
         exit 1
     }
     Write-Host "    not running, starting 'ollama serve' in the background..."
+    # translate.parallel sends 8 requests at once; with fewer slots they queue.
+    $env:OLLAMA_NUM_PARALLEL = "8"
+    # 8-bit KV cache: 60.0 -> 55.8 s on 736 lines; 400 lines differed from f16
+    # no more than two f16 runs differ from each other (2026-10-28).
+    $env:OLLAMA_KV_CACHE_TYPE = "q8_0"
     Start-Process -FilePath $exe -ArgumentList "serve" -WindowStyle Hidden | Out-Null
     $deadline = (Get-Date).AddSeconds(30)
     while ((Get-Date) -lt $deadline) {
