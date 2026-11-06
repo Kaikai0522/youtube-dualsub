@@ -108,7 +108,12 @@ if half its letters are found there — so this is not re-transcription, and a
 hallucination cannot reach the screen. On that video: 80 of 165 lines moved,
 median start −0.7 s / end −0.6 s, none onto Whisper's own words, +88 s of GPU
 time. Unverified against human timing: the one human-captioned clip adds only
-two lines, both too short to align.
+two lines, both too short to align. The retime decode is greedy
+(`asr.gap_retime_beam_size = 1`, 2026-11-06): its text is matched, never shown.
+On `v-V9NpCvPDk` it halved the decode (113.9 → 56.1 s) and placed more lines by
+decoding (69 → 82); on 200 lines Whisper also heard, starts over 1 s off went
+42 → 34. That truth is Whisper's own easy lines; on the missed lines no check
+could tell beam 1 from beam 5, so if retiming regresses, suspect this first.
 
 **Lines decoding cannot place are force-aligned** (`gapfill.retime_forced`,
 `asr.align_texts`, 2026-10-28). Decoding a shouted window loops (ああ ×30,
@@ -134,6 +139,15 @@ heard in place. Widening the retime window back 7 s to catch an early first word
 their own words (何それ?何それ? 433.6 → 426.7 s on `v-V9NpCvPDk`). The
 windows' total must stay under the audio length or faster-whisper asserts
 (`asr._within`).
+
+**The looping-chunk re-decode keeps its full ladder and beam** (measured
+2026-11-06). It is the slowest part of transcription: 10 chunks took 69 of 153 s
+on `v-V9NpCvPDk`, three of them 15–19 s each. Every faster variant scored ~4–5
+points lower precision against YouTube's captions for the same spans (0.73 →
+0.67–0.69) by adding junk like アッツァッツァ: repetition_penalty 1.1 +
+no_repeat_ngram 4 (22 s), max_new_tokens 200 (39 s), beam 1 (87 s, slower).
+A three-step ladder saved nothing. n = 10, so this is weak evidence; the
+unmeasured alternative is dropping a looping chunk and letting gap-fill cover it.
 
 **Short lines repeated by several people are speech, not a loop.** The repeat
 filter only drops a line of 8+ characters said three times running; it used to
@@ -188,6 +202,15 @@ costs no network. Moving the upgrade into the pipeline's `AudioUnavailable`
 handler looks obvious and does nothing: the running process already holds the old
 `yt_dlp` module in memory, so the fix cannot take effect until the next restart.
 
+**Ollama's tuning only applies to an Ollama that `start.ps1` launched.** The
+tray app starts at login, so `OLLAMA_NUM_PARALLEL=8` / `OLLAMA_KV_CACHE_TYPE=q8_0`
+were never live (its `server.log` showed 4 slots and an f16 cache). Fixing it
+measured 60.5 → 57.9 s on 736 lines, n = 1 — near noise, which is why
+`start.ps1` only warns. Where the time goes on a 27-minute Japanese video
+(426 s before the retime change): Whisper 77 s, looping re-decode 69 s, gap-fill
+retime ~150 s, diarization 40 s, context 16 s, translation 66 s. Translation is
+not the bottleneck; transcription repairs are.
+
 **Stages run serially and release their VRAM.** Demucs (~4 GB), Whisper (~3 GB)
 and a 12–14 B model (~9 GB) never coexist. Peak stays under 9 GB on a 16 GB card.
 A candidate model must fit in about 9 GB; Qwen3.8-27B (15 GB) does not run here.
@@ -209,7 +232,9 @@ and closer to reference labels, because the fine grid invented speakers. CAM++
 voice). Threshold 0.9 plus dropping clusters under 5 s / 3 % of speech gave the
 right count on two- and three-person clips; without the drop, laughter and game
 audio became four extra "speakers". It runs *after* Whisper — concurrently, the
-two fought over the CPU and the pair was slower than in sequence.
+two fought over the CPU and the pair was slower than in sequence. The same holds
+for the gap-fill retime (2026-11-06): alongside diarization its decode went
+56 → 102 s, and the pair saved 5 s of 107.
 
 **`diarize._preload_onnxruntime` must run before sherpa-onnx loads.** The wheel
 ships no `onnxruntime.dll`, so Windows picks System32's 1.17 copy (Windows ML)

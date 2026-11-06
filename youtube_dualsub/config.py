@@ -136,6 +136,14 @@ class AsrConfig:
     # the line's stretch without the VAD; YouTube's windows are display times,
     # not speech times (gapfill.retime).
     youtube_gap_retime: bool = True
+    # The retime decode's text is only matched against YouTube's, never shown,
+    # so it decodes greedily. Measured on v-V9NpCvPDk (2026-11-06): 142 added
+    # lines 113.9 s -> 56.1 s, more of them placed by decoding (69 -> 82).
+    # On 200 YouTube lines Whisper's main pass also heard (truth = its word
+    # times), lines with a start over 1 s off went 42 -> 34, ends 34 -> 33.
+    # On the missed lines themselves no check told the two apart (the same
+    # 4/142 landed on Whisper's own words); there is no better truth there.
+    gap_retime_beam_size: int = 1
     # Whisper falls back through these temperatures when a window looks degenerate.
     temperature: tuple[float, ...] = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
     compression_ratio_threshold: float = 2.4
@@ -344,7 +352,8 @@ class Settings:
                 f"prompt{int(a.context_prompt)}",
                 f"snap{int(a.snap_to_speech)}",
                 f"ytfill{int(a.youtube_gap_fill)}",
-                f"retime{int(a.youtube_gap_retime)}",
+                f"retime{int(a.youtube_gap_retime)}b{a.gap_retime_beam_size}",
+                f"beam{a.beam_size}",
                 f"vadt{a.vad_threshold}",
                 f"vocals{int(self.vocals.enabled)}",
                 self._diarization_key(),

@@ -256,7 +256,8 @@ def decode_windows(
                 audio,
                 language=language,
                 batch_size=cfg.batch_size,
-                beam_size=cfg.beam_size,
+                # Greedy: the text is matched, never shown (config.py has the numbers).
+                beam_size=cfg.gap_retime_beam_size,
                 word_timestamps=True,
                 without_timestamps=False,
                 temperature=0.0,

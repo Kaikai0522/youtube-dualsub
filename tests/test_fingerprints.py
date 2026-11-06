@@ -53,6 +53,11 @@ class TestAsrFingerprint:
         """It moves stored sentence times."""
         assert with_(asr={"youtube_gap_retime": False}).asr_fingerprint != Settings().asr_fingerprint
 
+    def test_the_beam_sizes_matter(self):
+        """Both decode passes change what is stored: words, and retimed lines."""
+        for override in ({"asr": {"beam_size": 1}}, {"asr": {"gap_retime_beam_size": 5}}):
+            assert with_(**override).asr_fingerprint != Settings().asr_fingerprint, override
+
     def test_youtube_gap_filling_matters(self):
         """It adds lines to the stored transcript."""
         assert with_(asr={"youtube_gap_fill": False}).asr_fingerprint != Settings().asr_fingerprint

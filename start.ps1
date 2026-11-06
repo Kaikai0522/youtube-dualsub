@@ -197,6 +197,23 @@ Write-Ok "model=$model  server=${httpHost}:${port}"
 Write-Step "Checking Ollama"
 if (Test-Url "http://127.0.0.1:11434/api/version") {
     Write-Ok "Already serving."
+    # An Ollama started elsewhere (the tray app starts at login) never sees the
+    # variables set below: measured 2026-11-06, it had run with 4 slots and an
+    # f16 KV cache for weeks. Read what it actually started with.
+    $log = "$env:LOCALAPPDATA\Ollama\server.log"
+    if (Test-Path $log) {
+        $line = Select-String -Path $log -Pattern 'msg="server config"' | Select-Object -Last 1
+        if ($line) {
+            $parallel = if ($line.Line -match 'OLLAMA_NUM_PARALLEL:(\d+)') { [int]$Matches[1] } else { 0 }
+            $kv = if ($line.Line -match 'OLLAMA_KV_CACHE_TYPE:(\S*)') { $Matches[1] } else { "" }
+            if ($parallel -lt 8 -or $kv -ne "q8_0") {
+                Write-Warn2 "Ollama is running with NUM_PARALLEL=$parallel, KV cache '$kv' (wanted 8 / q8_0)."
+                Write-Host "    Translation still works, about 4% slower. To fix it once, set these user"
+                Write-Host "    environment variables and quit + restart Ollama from the tray:"
+                Write-Host "      OLLAMA_NUM_PARALLEL=8  OLLAMA_KV_CACHE_TYPE=q8_0  OLLAMA_FLASH_ATTENTION=1"
+            }
+        }
+    }
 } else {
     $exe = $null
     if (Test-Command "ollama") {
@@ -214,6 +231,8 @@ if (Test-Url "http://127.0.0.1:11434/api/version") {
     # 8-bit KV cache: 60.0 -> 55.8 s on 736 lines; 400 lines differed from f16
     # no more than two f16 runs differ from each other (2026-10-28).
     $env:OLLAMA_KV_CACHE_TYPE = "q8_0"
+    # A quantised KV cache needs flash attention; without it Ollama keeps f16.
+    $env:OLLAMA_FLASH_ATTENTION = "1"
     Start-Process -FilePath $exe -ArgumentList "serve" -WindowStyle Hidden | Out-Null
     $deadline = (Get-Date).AddSeconds(30)
     while ((Get-Date) -lt $deadline) {
