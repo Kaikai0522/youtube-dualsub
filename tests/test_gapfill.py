@@ -48,6 +48,23 @@ def test_sound_tags_are_not_speech():
     assert [f.text for f in added] == ["うわ、うわ、"]
 
 
+def test_english_speaker_marks_are_not_speech():
+    """PvTyTUkuem8: ">>" alone passed as a two-letter line, 28 times."""
+    lines = [(3.27, 4.16, [(3.27, ">>")]), (40.0, 42.0, [(40.0, ">> Oh,"), (40.5, " you put it in water?")])]
+
+    added = fill_gaps(heard((100.0, 100.5, "Hi.")), lines)
+
+    assert [f.text for f in added] == ["Oh, you put it in water?"]
+
+
+def test_shouting_in_capitals_is_what_whisper_heard():
+    """YouTube's WORK TO DO is Whisper's "work to do": not a missed line."""
+    whisper = heard((173.61, 174.67, " body work to do."))
+    lines = [(173.83, 174.63, [(173.83, "WORK TO DO.")])]
+
+    assert fill_gaps(whisper, lines) == []
+
+
 def test_a_rolling_window_ends_where_the_next_line_starts():
     """json3 keeps a line up while the next rolls in; the speech is shorter."""
     lines = [(176.64, 180.56, [(176.64, "こいつやば。")]), (178.56, 181.28, [(178.56, "こいつやばいんだけど。")])]

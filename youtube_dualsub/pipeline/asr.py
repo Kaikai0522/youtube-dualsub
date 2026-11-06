@@ -446,6 +446,8 @@ _STRANDED_TOKEN_S = 0.1
 _OVERLONG_TOKEN_S = 0.6
 #: A held vowel (えーー) is legitimately long.
 _HELD_VOWEL = "ー〜"
+#: How many opening words of a sentence may be stranded, outside CJK.
+_LATIN_HEAD_WORDS = 2
 
 
 def _unstrand(words: list[Word]) -> None:
@@ -479,7 +481,21 @@ def _unstrand(words: list[Word]) -> None:
         before, after = left.text.strip(), right.text.strip()
         if not (before and after and before[-1].isalnum() and after[0].isalnum()):
             continue
-        if not (is_cjk_char(before[-1]) or is_cjk_char(after[0])):
+        # English shows the same fault one word at a time: a sentence's first
+        # word stamped in earlier speech, the rest later ("That" 258.46 s,
+        # "was clean" 271.36 s; "lie. This" 273.69 s, "is looking" 282.65 s on
+        # PvTyTUkuem8 — about 70 times, up to 47 s early). Only a sentence's
+        # opening words: further in, an English pause is a real pause. After a
+        # full stop the next word must also continue in lower case.
+        head = i
+        while head > 0 and words[head - 1].text.strip()[-1:] not in ".?!":
+            head -= 1
+        latin_head = (
+            i - head < _LATIN_HEAD_WORDS
+            and all(w.text.strip()[-1:].isalnum() for w in words[head : i + 1])
+            and (head == 0 or (after[:1].isascii() and after[:1].islower()))
+        )
+        if not (is_cjk_char(before[-1]) or is_cjk_char(after[0]) or latin_head):
             continue
         # The stranded run: back to the last punctuation or the fragment start.
         first = i

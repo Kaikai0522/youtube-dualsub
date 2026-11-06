@@ -51,6 +51,9 @@ _MIN_CHARS = 2
 
 #: Sound tags YouTube writes for non-speech: [笑い], [叫び声], [音楽], [Music].
 _SOUND_TAG = re.compile(r"\[[^\]]*\]")
+#: English auto-captions mark a change of speaker with ">>". It is not speech:
+#: on PvTyTUkuem8 it passed as a two-letter line Whisper "missed", 28 times.
+_SPEAKER_MARK = re.compile(r">>\s*")
 _NOT_TEXT = re.compile(r"[\s、。，,.!?！？…ー〜~「」『』()（）・♪\-]")
 
 
@@ -63,7 +66,7 @@ def fill_gaps(fragments: list[Fragment], lines: list[AutoLine]) -> list[Fragment
     ]
     spoken = []
     for start, end, pieces in lines:
-        pieces = [(t, _SOUND_TAG.sub("", text)) for t, text in pieces]
+        pieces = [(t, _SPEAKER_MARK.sub("", _SOUND_TAG.sub("", text))) for t, text in pieces]
         pieces = [(t, text) for t, text in pieces if text.strip()]
         if pieces:
             spoken.append((start, end, pieces))
@@ -286,7 +289,9 @@ def _said(text: str) -> int:
 
 
 def _letters(text: str) -> str:
-    return _NOT_TEXT.sub("", text)
+    # Lower-cased: YouTube writes shouting in capitals (WORK TO DO), Whisper
+    # does not, and the same words were added again as a line Whisper "missed".
+    return _NOT_TEXT.sub("", text).lower()
 
 
 def _found(wanted: str, nearby: str) -> float:

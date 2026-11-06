@@ -129,6 +129,32 @@ class TestSnapToSpeech:
         [out] = snap_to_speech([fragment], [(9.8, 12.0)])
         assert out.start == pytest.approx(10.0)
 
+    def test_an_english_first_word_left_in_earlier_speech_rejoins_its_sentence(self):
+        """PvTyTUkuem8 4:18: "That" at 258.46 s, "was clean" from 271.36 s."""
+        words_ = [word(258.46, 258.56, " That"), word(271.36, 271.60, " was"), word(271.60, 272.0, " clean.")]
+        fragment = Fragment(258.46, 272.0, " That was clean.", words_)
+        [out] = snap_to_speech([fragment], [(255.0, 258.7), (271.2, 273.0)])
+        assert out.start == pytest.approx(271.26)
+
+    def test_an_english_pause_inside_a_sentence_is_left_alone(self):
+        words_ = [word(10.0, 10.3, " I'm"), word(10.3, 10.6, " just"), word(10.6, 10.9, " adding"),
+                  word(12.0, 12.3, " the"), word(12.3, 12.6, " roof.")]
+        fragment = Fragment(10.0, 12.6, "", words_)
+        [out] = snap_to_speech([fragment], [(9.8, 13.0)])
+        assert out.words[2].end == pytest.approx(10.9)
+
+    def test_a_next_sentences_first_word_moves_to_its_sentence(self):
+        """PvTyTUkuem8 4:33: "...lie. This" at 273.69 s, "is looking good." at 282.65 s."""
+        words_ = [word(271.3, 273.4, " lie."), word(273.69, 273.8, " This"),
+                  word(282.65, 282.9, " is"), word(282.9, 283.3, " good.")]
+        [out] = snap_to_speech([Fragment(271.3, 283.3, "", words_)], [(271.0, 274.0), (282.5, 284.0)])
+        assert out.words[1].start == pytest.approx(282.55)
+
+    def test_a_capitalised_next_sentence_keeps_its_own_first_word(self):
+        words_ = [word(1.0, 2.0, " Yes."), word(2.5, 3.0, " Okay"), word(5.0, 6.0, " Next.")]
+        [out] = snap_to_speech([Fragment(1.0, 6.0, "", words_)], [(0.5, 6.5)])
+        assert out.words[1].start == pytest.approx(2.5)
+
     def test_a_pause_after_punctuation_is_left_alone(self):
         words_ = [word(97.31, 97.63, "で、"), word(101.78, 101.86, "ス")]
         fragment = Fragment(97.31, 101.86, "で、ス", words_)

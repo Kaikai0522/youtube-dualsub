@@ -119,5 +119,16 @@ def _pattern(variant: str) -> re.Pattern[str]:
 
 def apply_glossary(text: str, glossary: Glossary) -> str:
     for pattern, replacement in glossary.substitutions:
-        text = pattern.sub(replacement, text)
+        # A target that contains its source (ABS -> ABS 樹脂) is often already
+        # there, because the prompt asked for it; rewriting the source inside
+        # it gave "ABS 樹脂 樹脂" and "Bambu Lab Bambu Lab H2C".
+        done = [
+            m.span() for m in re.finditer(re.escape(replacement), text, re.IGNORECASE)
+        ]
+        text = pattern.sub(
+            lambda m, done=done, rep=replacement: m.group(0)
+            if any(s <= m.start() and m.end() <= e for s, e in done)
+            else rep,
+            text,
+        )
     return text

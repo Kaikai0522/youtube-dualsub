@@ -1,5 +1,7 @@
 # youtube_dualsub
 
+Use traditional chinese to answer user.
+
 Local bilingual YouTube subtitles. Pipeline, setup and tuning are in `README.md`;
 this file carries only what the code and config cannot tell you on their own.
 
@@ -55,7 +57,13 @@ before a digit (で at 228.13 s, 1ラウンド at 235.04 s), and a gap hidden in
 an over-long first token (で stretched 598.53–600.41 s). On `v-V9NpCvPDk` 17 of
 469 lines moved later; of those with a YouTube word time, 6 moved to within
 0.4 s of it and 2 "moved away" only because YouTube's time was for an earlier
-sentence in the same line. English (`km1IlBAZJH0`) is untouched. A harness that
+sentence in the same line. English (`km1IlBAZJH0`) is untouched by the kana rules. English has its own
+shape (2026-11-06): a *sentence's* first one or two words stamped in earlier
+speech — "That" 258.46 s, "was clean" 271.36 s; "lie. This" 273.69 s, "is
+looking good." 282.65 s. On `PvTyTUkuem8` 91 words moved, up to 220 s; lines
+"stranded" as a lone opening word 43 → 1. Only sentence heads move (fragment
+start, or after .?! when the next word is lower case): further in, an English
+pause is real. A harness that
 matches a line's first words anywhere nearby is biased early (いや, これ recur);
 match the first four letters and take the nearest occurrence.
 
@@ -86,7 +94,10 @@ nearby words hold under a third of its text *and* cover under half its time:
 2 of 2 added lines were right on `0RcKbPmnvRU`; on `VlaTbwhSSqk`, 19 added,
 mostly the shouting, with one duplicate spelled differently (チャク様 / さくさま).
 Only the original-language track (`ja-orig`, `ja`) is used; `[笑い]` tags are not
-speech and must not end the line before them.
+speech and must not end the line before them. Nor is English's `>>` speaker
+mark, and matching ignores case (YouTube writes shouting as WORK TO DO): on
+`PvTyTUkuem8` both together had added 28 lines of bare `>>` and duplicates of
+lines Whisper had (104 of 712 lines carried a `>>`).
 
 **Added lines keep YouTube's text but take Whisper's timing** (`gapfill.retime`).
 Most auto-caption lines have no word offsets (372 of 505 on `v-V9NpCvPDk`), only

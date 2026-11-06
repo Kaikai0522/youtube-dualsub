@@ -38,7 +38,10 @@ LOCAL_CONFIG = ROOT / "config.local.json"
 #:     over-long first token cut back before re-attaching.
 #: v7: YouTube gap-fill lines drop edge words Whisper already has.
 #: v8: gap-fill lines Whisper's decode cannot match are force-aligned.
-INGEST_VERSION = 8
+#: v9: gap-fill ignores English ">>" speaker marks and letter case; an
+#:     English sentence's first word stranded in other speech (at a
+#:     fragment's start or the previous one's end) rejoins its sentence.
+INGEST_VERSION = 9
 
 #: Bump when the rules that accept or reject a wiki answer for a term change
 #: (``terms.py``). It keys the lookup cache, the cached per-video context and

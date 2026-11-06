@@ -79,3 +79,11 @@ def test_no_hand_written_domain_glossary_ships_by_default():
     assert Settings().postprocess.glossary_files == ("user.yaml",)
     assert not load_glossary(Settings())
 
+
+
+def test_a_target_containing_its_source_is_not_applied_twice():
+    """PvTyTUkuem8: the model already wrote ABS 樹脂, and got ABS 樹脂 樹脂."""
+    g = load_glossary(Settings(), auto_terms={"ABS": "ABS 樹脂", "H2C": "Bambu Lab H2C"})
+    assert apply_glossary("丙酮會融化 ABS 樹脂", g) == "丙酮會融化 ABS 樹脂"
+    assert apply_glossary("這款是 Bambu Lab H2C", g) == "這款是 Bambu Lab H2C"
+    assert apply_glossary("用 ABS 焊接", g) == "用 ABS 樹脂 焊接"
