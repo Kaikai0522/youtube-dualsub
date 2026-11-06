@@ -1,0 +1,13 @@
+{
+  "about": "Videos whose human captions are a full transcript in the spoken language. Chosen 2026-11-06 with coverage = share of YouTube's auto-caption letters the human track also has (>= 0.75: nothing big left out) and copy = share of the human track found in the auto track (<= 0.92: not an uploaded copy of the auto-captions, which would score YouTube's recogniser against itself). Rejected for copy: aZmEVKDutyA 0.98, km1IlBAZJH0 1.00, f-XK2Kjg_qk 0.98, xQYIIPQg4d8 1.00, b0mlLY0QnQA 1.00, O1CCHv_X_dY 0.94. Rejected for coverage (highlight-only captions): exRDaOPy60g 0.27, 1f81Vr32gnU 0.55, 8u9tXxZWfHM 0.59, and 3HKqdcweQz0, RhvHq6UsW2Q, qrGdbVXQqpk, 3kVyr0HNOz4, fBD4_hdbeS4, Yycc7DBIzuc at 0.62-0.71.",
+  "videos": [
+    {"id": "0RcKbPmnvRU", "lang": "ja", "coverage": 0.93, "copy": 0.83, "note": "2 speakers, Minecraft chat, 165 s"},
+    {"id": "U2kLbYz5y0U", "lang": "ja", "coverage": 0.85, "copy": 0.84, "note": "hololive collab talk, 744 s"},
+    {"id": "NvG_fuUC3S0", "lang": "ja", "coverage": 0.77, "copy": 0.89, "note": "hololive collab with listeners, 894 s"},
+    {"id": "z9gUKVsKUTI", "lang": "ja", "coverage": 0.89, "copy": 0.90, "note": "horror game (8番出口), shouting, 771 s"},
+    {"id": "yLnzdTS6oNI", "lang": "ja", "coverage": 0.83, "copy": 0.85, "note": "horror game, screaming and fast talk, 378 s"},
+    {"id": "SVihhbs64aU", "lang": "en", "coverage": 0.95, "copy": 0.78, "note": "Minecraft manhunt, many shouting players, 1969 s"},
+    {"id": "w_SWVBwcpdE", "lang": "en", "coverage": 0.84, "copy": 0.89, "note": "Sidemen outdoor game, crowd noise, 1182 s"},
+    {"id": "92ziHtxeKDk", "lang": "en", "coverage": 0.95, "copy": 0.89, "note": "two speakers, horror reactions, 1071 s"}
+  ]
+}

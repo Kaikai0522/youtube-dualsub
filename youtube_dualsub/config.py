@@ -141,8 +141,8 @@ class AsrConfig:
     # lines 113.9 s -> 56.1 s, more of them placed by decoding (69 -> 82).
     # On 200 YouTube lines Whisper's main pass also heard (truth = its word
     # times), lines with a start over 1 s off went 42 -> 34, ends 34 -> 33.
-    # On the missed lines themselves no check told the two apart (the same
-    # 4/142 landed on Whisper's own words); there is no better truth there.
+    # Against human captions (dualsub-eval, 8 videos) beam 5 was within 0.3
+    # points on every pooled metric; AGENTS.md has the one clip that moved.
     gap_retime_beam_size: int = 1
     # Whisper falls back through these temperatures when a window looks degenerate.
     temperature: tuple[float, ...] = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)

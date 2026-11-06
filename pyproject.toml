@@ -29,10 +29,14 @@ vocals = [
     "torch>=2.6",
     "torchaudio>=2.6",
 ]
-dev = ["pytest>=8.0"]
+dev = [
+    "pytest>=8.0",
+    "rapidfuzz>=3.9",
+]
 
 [project.scripts]
 dualsub = "youtube_dualsub.cli:main"
+dualsub-eval = "youtube_dualsub.asr_eval:main"
 
 [build-system]
 requires = ["hatchling"]

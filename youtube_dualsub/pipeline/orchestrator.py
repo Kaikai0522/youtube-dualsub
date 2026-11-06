@@ -134,6 +134,27 @@ class Orchestrator:
             raise
 
     # ------------------------------------------------------------------
+    def transcript(
+        self, video_id: str, *, on_progress: ProgressCb | None = None
+    ) -> JobResult:
+        """Only the stored sentences: no context, no translation (asr_eval uses this).
+
+        Cached under the ASR fingerprint like a normal run, so re-scoring with
+        unchanged settings costs nothing.
+        """
+        result = JobResult(video_id=video_id, title=video_id, duration_s=0.0)
+
+        def emit(stage: Stage, fraction: float | None, message: str) -> None:
+            if on_progress:
+                on_progress(Progress(stage=stage, fraction=fraction, message=message))
+
+        self.store.ensure_job(video_id, stage=Stage.QUEUED, error=None, message="")
+        result.sentences = self._get_sentences(
+            video_id, self.settings.asr_fingerprint, result, emit, lambda: None
+        )
+        return result
+
+    # ------------------------------------------------------------------
     def _get_sentences(
         self,
         video_id: str,

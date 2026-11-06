@@ -112,8 +112,11 @@ two lines, both too short to align. The retime decode is greedy
 (`asr.gap_retime_beam_size = 1`, 2026-11-06): its text is matched, never shown.
 On `v-V9NpCvPDk` it halved the decode (113.9 → 56.1 s) and placed more lines by
 decoding (69 → 82); on 200 lines Whisper also heard, starts over 1 s off went
-42 → 34. That truth is Whisper's own easy lines; on the missed lines no check
-could tell beam 1 from beam 5, so if retiming regresses, suspect this first.
+42 → 34. Against human captions (`dualsub-eval`, all 8 videos) beam 5 was within
+0.3 points of beam 1 on every pooled metric (ja recall 92.2 vs 92.0 %, precision
+87.4 vs 87.1 %; en 95.6 vs 95.5 %, 93.5 vs 93.2 %) and slower on every video.
+The one clip that moved was the screaming `yLnzdTS6oNI`: recall +1.2, precision
++1.9 for beam 5. If screaming content becomes the target, re-measure there.
 
 **Lines decoding cannot place are force-aligned** (`gapfill.retime_forced`,
 `asr.align_texts`, 2026-10-28). Decoding a shouted window loops (ああ ×30,
@@ -328,6 +331,18 @@ from code that no longer exists.
 sees `visibilityState: "hidden"`, zero frames, and an empty overlay while the code
 is perfectly fine. Verify the backend by reading what the WebSocket sends; ask a
 human to look at the screen for the rest.
+
+**ASR changes are scored with `dualsub-eval`** (`youtube_dualsub/asr_eval.py`,
+set in `eval/asr_set.json`). Run it before and after, with `--compare`. Its
+references are human captions vetted against YouTube's auto-captions: many
+"human" tracks are highlight cards (coverage 0.27–0.71) or uploaded copies of
+the auto track (0.94–1.00), and either would quietly corrupt the score — the
+copy would credit gap-fill for agreeing with itself. Absolute CER/WER is
+inflated by caption style (dropped fillers on `w_SWVBwcpdE`: "oh" ×53 inserted;
+on `SVihhbs64aU` most of the WER is Whisper dropping overlapped shouting), so
+read differences between runs, not the level. Only the timing of lines whose
+first four letters open a transcript line is scored. Before this set, every
+ASR measurement here rested on `0RcKbPmnvRU` (48 lines).
 
 **Measure on real output before concluding.** Every wrong diagnosis in this
 project's history came from reasoning about the code instead of instrumenting it,
