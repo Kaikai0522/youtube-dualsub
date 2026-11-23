@@ -22,6 +22,7 @@ from typing import Callable
 from ..config import TERMS_VERSION, Settings
 from ..export import write_ass, write_srt
 from ..glossary import load_glossary
+from ..lang import base_language
 from ..llm import LlmError, OllamaClient
 from ..models import Cue, Progress, Sentence, Stage, Translation, VideoContext
 from ..store import Store
@@ -199,7 +200,7 @@ class Orchestrator:
                 sentences = sentences_stage.sentences_from_captions(
                     asr_stage.fragments_from_cues(cues), settings
                 )
-                if settings.diarization.enabled:
+                if _wants_diarization(settings, language):
                     # Captions say what was said, not who said it; that
                     # needs the audio after all.
                     check()
@@ -281,7 +282,7 @@ class Orchestrator:
             # After Whisper, not alongside it: run concurrently, the two fought
             # over the CPU and transcription slowed by more than diarization
             # takes on its own (~5 s for a 7.5-minute clip).
-            if settings.diarization.enabled:
+            if _wants_diarization(settings, transcription.language or language):
                 check()
                 turns = self._diarize(track, emit)
                 if turns:
@@ -482,3 +483,12 @@ def export_result(result: JobResult, settings: Settings, formats: list[str]) -> 
 def _safe_stem(title: str, video_id: str) -> str:
     cleaned = "".join(c for c in title if c.isalnum() or c in " -_()[]").strip()
     return f"{cleaned[:80] or video_id}.{video_id}"
+
+
+def _wants_diarization(settings: Settings, language: str | None) -> bool:
+    """Diarization only where a change of voice is a boundary worth its cost.
+
+    An unknown language still diarizes: it is the safe side for Japanese."""
+    cfg = settings.diarization
+    lang = base_language(language)
+    return cfg.enabled and (lang is None or lang in cfg.languages)

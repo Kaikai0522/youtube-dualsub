@@ -267,3 +267,43 @@ class TestJapaneseSource:
         """The proportional point falls inside カードゲーム; it used to cut there."""
         parts = shape._distribute_chars("なんかカードゲームはしたことあるけどさ", [5, 15])
         assert parts == ["なんか", "カードゲームはしたことあるけどさ"]
+
+
+class TestLineWidth:
+    """Measured on fhpAolluo9g: 63 English rows over 50 characters (up to 80,
+    nearly the player's width), and Chinese cut as 他 / 們, 專業田 / 徑選手,
+    25 / 歲."""
+
+    def test_chinese_words_are_not_severed(self):
+        zh = "完全不讓其他孩子發現他們對手是個專業選手。"
+        parts = shape._split_cjk(zh, 12, words=True)
+        assert len(parts) == 2
+        assert not parts[0].endswith("他"), parts
+        assert "".join(parts) == zh
+
+    def test_a_number_stays_with_its_unit(self):
+        zh = "這是一位 25 歲的美國田徑隊專業奧運短跑選手，而今天"
+        parts = shape._split_cjk(zh, 20, words=True)
+        assert all(not p.rstrip().endswith("25") for p in parts), parts
+
+    def test_a_long_english_line_splits_with_a_short_translation(self):
+        en = "I'm sneaking him into a high school track meet completely undercover today"
+        cues = shape.build_cues(
+            [sentence(0, 0.0, 6.0, en)], [translation(0, "我要讓他喬裝潛入一場高中田徑比賽")], settings()
+        )
+        assert len(cues) == 2
+        assert all(c.target for c in cues), "the translation must follow the split"
+        assert all(len(c.source) <= Settings().shape.max_chars_en for c in cues)
+        assert " ".join(c.source for c in cues) == en
+
+    def test_a_split_too_short_to_read_becomes_two_rows(self):
+        """Two 0.6 s cues flash; one 1.2 s cue with two rows does not."""
+        en = "Bro, what are y'all doing? Hurry up, we gotta get the disguises on, bro."
+        cues = shape.build_cues(
+            [sentence(0, 0.0, 1.2, en)],
+            [translation(0, "兄弟，你們在幹嘛？快點，我們得把喬裝弄好，兄弟。")],
+            settings(),
+        )
+        assert len(cues) == 1
+        assert cues[0].source.count("\n") == 1 and cues[0].target.count("\n") == 1
+        assert all(len(row) <= Settings().shape.max_chars_en for row in cues[0].source.split("\n"))

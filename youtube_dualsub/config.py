@@ -160,6 +160,11 @@ class DiarizationConfig:
     """
 
     enabled: bool = True
+    # Only where it was measured to help. Japanese has no punctuation in fast
+    # cross-talk, so a change of voice is often the only boundary. English
+    # has punctuation: on fhpAolluo9g diarization moved 9 of 434 boundaries,
+    # every one a wrong cut (Me / too, on the / curve), and cost 39 of 182 s.
+    languages: tuple[str, ...] = ("ja", "zh", "ko")
     embedding_model: str = "3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx"
     # CAM++ (zh/en) was measured against ERes2NetV2, TitaNet and WeSpeaker on
     # three Japanese clips: best agreement with reference speaker labels and
@@ -298,7 +303,7 @@ class ShapeConfig:
     # ends up showing text seconds before it is spoken.
     merge_max_gap_s: float = 0.6
     max_chars_zh: int = 20          # full-width chars per Chinese line
-    max_chars_en: int = 84          # source line in a spaced script
+    max_chars_en: int = 50          # source line in a spaced script; ~ the width of 20 Chinese chars
     max_chars_ja: int = 30          # source line in Japanese, full-width chars
     max_duration_s: float = 7.0
     min_duration_s: float = 1.0     # soft floor; never crosses the next cue (Q29)

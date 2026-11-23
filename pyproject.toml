@@ -19,6 +19,7 @@ dependencies = [
     "nvidia-cudnn-cu12>=9.1,<10",
     # Speaker diarization, CPU-only ONNX: no torch, no VRAM (pipeline/diarize.py).
     "sherpa-onnx>=1.12",
+    "jieba>=0.42.1",
 ]
 
 [project.optional-dependencies]

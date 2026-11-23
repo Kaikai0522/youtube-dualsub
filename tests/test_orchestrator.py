@@ -268,7 +268,22 @@ class TestSpeakers:
             return [Turn(0.0, 2.5, "1"), Turn(2.9, 5.0, "2")]
 
         monkeypatch.setattr(orch.diarize_stage, "diarize", fake_diarize)
-        return _merge(settings, {"diarization": {"enabled": True}}), calls
+        # The fakes speak English; diarization is on for it here so the
+        # plumbing is tested. By default English skips it (next test).
+        return _merge(
+            settings, {"diarization": {"enabled": True, "languages": ["en", "ja"]}}
+        ), calls
+
+    def test_english_skips_diarization_by_default(self, settings, store, monkeypatch, fakes):
+        calls = {"n": 0}
+        monkeypatch.setattr(
+            orch.diarize_stage, "diarize", lambda *a, **k: calls.__setitem__("n", 1) or []
+        )
+        settings = _merge(settings, {"diarization": {"enabled": True}})
+        result = orch.Orchestrator(settings, store).run(VIDEO)
+
+        assert calls["n"] == 0
+        assert all(s.speaker is None for s in result.sentences)
 
     def test_whisper_lines_carry_their_speaker(self, diarized, store):
         settings, _ = diarized

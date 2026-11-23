@@ -184,7 +184,20 @@ the only form "two rows" can take.
 **Splitting protects known words.** Chinese has no spaces, so an index-based
 split severs 種子碼 into 種 / 子碼. `shape._forbidden_cuts` protects glossary
 renderings and Latin/number tokens, and balance beats filling: 23 characters
-under a 20-character limit split 12 + 11, not 20 + 3.
+under a 20-character limit split 12 + 11, not 20 + 3. Everything else is kept
+whole by jieba word spans (2026-11-24), segmented through OpenCC t2s because
+its dictionary is Simplified (on Traditional text it glued 進田徑, 比賽並); a
+number stays with its unit (25 / 歲), and a space is a break only between two
+CJK characters. On `fhpAolluo9g` the old split gave 他 / 們, 專業田 / 徑選手.
+
+**A source row is at most 50 characters, about the width of 20 Chinese
+characters** (`shape.max_chars_en`, was 84). At 84 an English row filled the
+player; on `fhpAolluo9g` 63 rows were over 50, on `Caxv8tLATnc` 174. Whichever
+language needs more pieces sets the count. A piece shorter than
+`min_duration_s` does not get its own cue: the pieces become two rows of one
+cue (`\n`, which the overlay and both exports render). Splitting into cues
+alone took sub-0.8 s flashes on `Caxv8tLATnc` from 31 to 108; with the rows,
+31.
 
 **Chrome match patterns carry no port.** `http://127.0.0.1:8756/*` in
 `manifest.json` is invalid and Chrome rejects the *whole manifest*, so the
@@ -246,6 +259,16 @@ alone does not load the DLL; `ctypes.WinDLL` on the pip package's copy does.
 
 **Models download from Hugging Face, not GitHub releases** — ~7 MB/s against
 ~35 KB/s for the same files.
+
+**Diarization runs only for Japanese, Chinese and Korean**
+(`diarization.languages`, 2026-11-24). English has punctuation to cut on, and
+there a change of voice only cut phrases apart: on `fhpAolluo9g` it moved 9 of
+434 boundaries, every one wrong (Me / too, on the / curve), and cost 39 of
+182 s; on `w_SWVBwcpdE` it made 520 lines out of 492, nearly all of them
+severed (I'm going to / be honest, Three, two, one, / go!). English cues
+therefore carry no speaker and never show the dialogue row. Cached English
+transcripts keep their old boundaries; the fingerprint was not bumped, so
+Japanese caches survive.
 
 **A speaker change is a strong sentence boundary, not a forced one.** Turn
 edges are only word-accurate, so forcing the cut stranded single words; the

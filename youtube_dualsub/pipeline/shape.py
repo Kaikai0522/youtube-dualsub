@@ -81,7 +81,10 @@ def build_cues(
     cues.sort(key=lambda c: (c.start, c.end))
     cues = _merge_short(cues, cfg.merge_below_s, cfg.max_duration_s, cfg.merge_max_gap_s)
     cues = _rejoin_severed(cues, protect, cfg.merge_max_gap_s)
-    cues = _split_long(cues, cfg.max_chars_zh, cfg.max_chars_en, protect, cfg.max_chars_ja)
+    cues = _split_long(
+        cues, cfg.max_chars_zh, cfg.max_chars_en, protect, cfg.max_chars_ja,
+        min_piece_s=cfg.min_duration_s,
+    )
     return _clamp(cues, cfg.max_duration_s, cfg.min_duration_s, cfg.cue_gap_s)
 
 
@@ -220,32 +223,57 @@ def _split_long(
     max_en: int,
     protect: Sequence[str] = (),
     max_ja: int | None = None,
+    min_piece_s: float = 0.0,
 ) -> list[Cue]:
     out: list[Cue] = []
     for cue in cues:
         cjk_source = is_cjk(cue.source)
         max_src = (max_ja or max_zh) if cjk_source else max_en
-        parts_zh = _split_cjk(cue.target, max_zh, protect) if cue.target else []
+        # Whichever language needs more pieces decides; the other follows.
+        # A long English line under a short translation used to stay one
+        # screen-wide cue (or lose its translation when split alone).
+        src_pieces = 1 if cjk_source else len(_split_words(cue.source, max_src))
+        parts_zh = (
+            _split_cjk(cue.target, max_zh, protect, pieces=src_pieces, words=True)
+            if cue.target
+            else []
+        )
         n = len(parts_zh)
         if n <= 1 and len(cue.source) <= max_src:
             out.append(cue)
             continue
         if n <= 1:
-            # Untranslated but very long source: split on the source alone.
+            # Very long source over a short (or no) translation: split the
+            # source alone. A translation that fits stays whole on one piece.
             parts_en = (
                 _split_cjk(cue.source, max_src, protect)
                 if cjk_source
                 else _split_words(cue.source, max_src)
             )
             n = len(parts_en)
+            if cue.target and n > 1:
+                out.append(_replace_text(cue, "\n".join(parts_en), cue.target))
+                continue
             parts_zh = [""] * n
         elif cjk_source:
             parts_en = _distribute_chars(cue.source, [len(p) for p in parts_zh], protect)
         else:
-            parts_en = _distribute_words(cue.source, [len(p) for p in parts_zh])
+            parts_en = _distribute_words(cue.source, [len(p) for p in parts_zh], max_src)
 
         if n <= 1:
             out.append(cue)
+            continue
+
+        # A piece too short to read becomes a second row of the same cue
+        # instead of its own flash on screen: the text still fits the width,
+        # and nothing outlives its speech.
+        groups = max(1, min(n, int(cue.duration / min_piece_s))) if min_piece_s > 0 else n
+        bounds = [round(k * n / groups) for k in range(groups + 1)]
+        parts_en = ["\n".join(p.strip() for p in parts_en[a:b]) for a, b in zip(bounds, bounds[1:])]
+        parts_zh = ["\n".join(p.strip() for p in parts_zh[a:b]) for a, b in zip(bounds, bounds[1:])]
+        n = groups
+        if n == 1:
+            out.append(_replace_text(cue, parts_en[0], parts_zh[0]))
             continue
 
         weights = [max(1, len(p)) for p in parts_zh] if any(parts_zh) else [1] * n
@@ -269,14 +297,68 @@ def _split_long(
     return out
 
 
+def _replace_text(cue: Cue, source: str, target: str) -> Cue:
+    return Cue(
+        start=cue.start,
+        end=cue.end,
+        source=source,
+        target=target,
+        speaker=cue.speaker,
+        translated=cue.translated,
+    )
+
+
 #: Latin words, numbers and version-like tokens must survive intact too, and
 #: so must katakana words: カー / ドゲーム reads as a mistake.
 _ATOMIC = re.compile(r"[A-Za-z][A-Za-z'’\-]*|\d+(?:[.,:]\d+)*%?|[ァ-ヺー]{2,}")
 
 
-def _forbidden_cuts(text: str, protect: Sequence[str]) -> set[int]:
-    """Indices ``i`` where cutting after ``text[i]`` would sever a known word."""
+#: A number and the unit after it: 25 / 歲 reads as two thoughts.
+_NUMBER_UNIT = re.compile(r"\d[\d.,:%]*\s?[一-鿿]")
+
+
+def _chinese_words(text: str) -> list[tuple[int, int]]:
+    """Spans of multi-character Chinese words, from jieba.
+
+    Without a word list the splitter cuts wherever the balance point falls:
+    他 / 們, 專業田 / 徑選手. jieba's dictionary is Simplified, so the text is
+    segmented through OpenCC's t2s (one character for one) and the spans mapped
+    back; on Traditional text directly it glues words (進田徑, 比賽並).
+    """
+    try:
+        import jieba
+        from opencc import OpenCC
+    except ImportError:  # pragma: no cover - both are declared dependencies
+        return []
+    global _T2S
+    if _T2S is None:
+        import logging
+
+        jieba.setLogLevel(logging.WARNING)
+        _T2S = OpenCC("t2s")
+    simplified = _T2S.convert(text)
+    if len(simplified) != len(text):
+        simplified = text
+    spans, i = [], 0
+    for word in jieba.cut(simplified):
+        if len(word) > 1:
+            spans.append((i, i + len(word)))
+        i += len(word)
+    return spans
+
+
+_T2S = None
+
+
+def _forbidden_cuts(text: str, protect: Sequence[str], words: bool = False) -> set[int]:
+    """Indices ``i`` where cutting after ``text[i]`` would sever a known word.
+
+    ``words`` adds Chinese word boundaries; only for the translation, since
+    jieba would cut Japanese at nonsense places."""
     spans: list[tuple[int, int]] = [m.span() for m in _ATOMIC.finditer(text)]
+    if words:
+        spans += _chinese_words(text)
+        spans += [m.span() for m in _NUMBER_UNIT.finditer(text)]
     for term in protect:
         if len(term) < 2:
             continue
@@ -291,7 +373,14 @@ def _forbidden_cuts(text: str, protect: Sequence[str]) -> set[int]:
     return forbidden
 
 
-def _split_cjk(text: str, limit: int, protect: Sequence[str] = ()) -> list[str]:
+def _split_cjk(
+    text: str,
+    limit: int,
+    protect: Sequence[str] = (),
+    *,
+    pieces: int = 1,
+    words: bool = False,
+) -> list[str]:
     """Split Chinese text into balanced pieces of at most ``limit`` characters.
 
     Balance matters as much as the ceiling. Filling each piece to the limit and
@@ -303,11 +392,16 @@ def _split_cjk(text: str, limit: int, protect: Sequence[str] = ()) -> list[str]:
     Punctuation is still preferred as a cut point, but the one nearest the
     balanced boundary wins rather than the last one that fits — otherwise the
     punctuation search reintroduces the imbalance it was meant to avoid.
+
+    ``pieces`` asks for at least that many parts (the source line is long);
+    ``words`` keeps Chinese words whole.
     """
     text = text.strip()
     if not text:
         return []
-    if len(text) <= limit:
+    # Never ask for pieces shorter than a few characters each.
+    pieces = max(1, min(pieces, len(text) // 4))
+    if len(text) <= limit and pieces <= 1:
         return [text]
 
     parts: list[str] = []
@@ -317,12 +411,14 @@ def _split_cjk(text: str, limit: int, protect: Sequence[str] = ()) -> list[str]:
     # number of pieces once up front breaks as soon as a punctuation cut lands
     # shorter than the target: the arithmetic still expects the original number
     # of pieces, and the final remainder overflows the limit.
-    while len(rest) > limit:
-        pieces = -(-len(rest) // limit)  # ceil
-        target = -(-len(rest) // pieces)
-        cut = _best_cut(rest, target, limit, _forbidden_cuts(rest, protect))
+    while len(rest) > limit or len(parts) + 1 < pieces:
+        left = max(-(-len(rest) // limit), pieces - len(parts))  # ceil
+        target = -(-len(rest) // left)
+        cut = _best_cut(rest, target, limit, _forbidden_cuts(rest, protect, words))
         parts.append(rest[: cut + 1].strip())
         rest = rest[cut + 1 :].lstrip()
+        if not rest:
+            break
 
     if rest:
         parts.append(rest)
@@ -343,7 +439,7 @@ def _best_cut(text: str, target: int, limit: int, forbidden: set[int] = frozense
     punctuation = [
         i
         for i, ch in enumerate(text[: ceiling + 1])
-        if ch in _CJK_BREAKS and i >= floor and i not in forbidden
+        if ch in _CJK_BREAKS and i >= floor and i not in forbidden and _is_break(text, i)
     ]
     if punctuation:
         return min(punctuation, key=lambda i: abs(i - (target - 1)))
@@ -362,6 +458,15 @@ def _best_cut(text: str, target: int, limit: int, forbidden: set[int] = frozense
     return min(target, ceiling + 1) - 1
 
 
+def _is_break(text: str, i: int) -> bool:
+    """A space is a break only between two CJK characters (two utterances
+    joined by ``_join``). Around a Latin word or number it is padding the
+    translator adds — 這是一位 25 歲 — and cutting there severs the phrase."""
+    if text[i] != " ":
+        return True
+    return 0 < i < len(text) - 1 and is_cjk_char(text[i - 1]) and is_cjk_char(text[i + 1])
+
+
 def _split_words(text: str, limit: int) -> list[str]:
     words = text.split()
     parts: list[str] = []
@@ -376,25 +481,43 @@ def _split_words(text: str, limit: int) -> list[str]:
     return parts or [text]
 
 
-def _distribute_words(text: str, weights: list[int]) -> list[str]:
+def _distribute_words(text: str, weights: list[int], limit: int | None = None) -> list[str]:
     """Cut the English into ``len(weights)`` pieces sized in proportion to the Chinese."""
     words = text.split()
     n = len(weights)
     if n <= 1 or not words:
         return [text] + [""] * (n - 1)
 
-    total = sum(weights) or n
     parts: list[str] = []
     cursor = 0
     for i, weight in enumerate(weights):
-        if i == n - 1:
+        if i == n - 1 or cursor >= len(words):
             parts.append(" ".join(words[cursor:]))
-            break
-        take = max(1, round(len(words) * weight / total))
-        take = min(take, len(words) - cursor - (n - i - 1))
-        take = max(take, 1)
-        parts.append(" ".join(words[cursor : cursor + take]))
-        cursor += take
+            cursor = len(words)
+            continue
+        share = weight / (sum(weights[i:]) or 1)
+        ideal = cursor + max(1, round((len(words) - cursor) * share))
+        hi = min(len(words), max(cursor + 1, len(words) - (n - i - 1)))
+
+        def cost(end: int) -> tuple:
+            # Over the limit is worst; then, within two words of the
+            # proportional point, prefer ending on punctuation (two merged
+            # utterances split where one ends); then the proportional point.
+            far = abs(end - ideal)
+            over = limit is not None and (
+                len(" ".join(words[cursor:end])) > limit
+                or len(" ".join(words[end:])) > limit * (n - i - 1)
+            )
+            return (
+                over,
+                far > 2,
+                not re.search(r"[.,!?;:]$", words[end - 1]),
+                far,
+            )
+
+        end = min(range(cursor + 1, hi + 1), key=cost)
+        parts.append(" ".join(words[cursor:end]))
+        cursor = end
     return parts
 
 
