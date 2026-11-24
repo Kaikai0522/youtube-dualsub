@@ -326,7 +326,14 @@ def _chinese_words(text: str) -> list[tuple[int, int]]:
     back; on Traditional text directly it glues words (進田徑, 比賽並).
     """
     try:
-        import jieba
+        import warnings
+
+        # jieba 0.42.1 (2020) is unmaintained: on Python 3.12 its regexes raise
+        # SyntaxWarning, and it imports the deprecated pkg_resources (falling
+        # back to a plain open() once setuptools drops it). Both are harmless.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            import jieba
         from opencc import OpenCC
     except ImportError:  # pragma: no cover - both are declared dependencies
         return []
